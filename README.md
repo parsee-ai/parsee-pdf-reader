@@ -10,3 +10,4 @@ Recommended install with poetry: https://python-poetry.org/docs/
 
 Alternatively: pip install parsee-pdf-reader
 
+## PRE-RELEASE PUBLIC VERSION -> big changes to repo in coming days (Feb 2024), recommended to wait for public relase (end of Feb 2024)
