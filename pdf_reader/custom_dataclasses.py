@@ -1,6 +1,7 @@
 import copy
 import json
 from typing import *
+import re
 from dataclasses import dataclass
 
 from pdf_reader.helper import clean_numeric_value
@@ -450,6 +451,11 @@ class BaseElement(Rectangle):
         self.row_index = min(self.row_index, element.row_index)
 
 
+def natural_text_elements(elements: List[BaseElement]) -> str:
+    elements_sorted = sorted(elements, key=lambda x: (x.row_index, x.x0))
+    return " ".join([x.text for x in elements_sorted])
+
+
 class BaseElementGroup(BaseElement):
 
     elements: List[BaseElement]
@@ -465,8 +471,7 @@ class BaseElementGroup(BaseElement):
         self.x1 = new_area.x1
         self.y0 = new_area.y0
         self.y1 = new_area.y1
-        elements_sorted = sorted(self.elements, key=lambda x: (x.row_index, x.x0))
-        self.text = " ".join([x.text for x in elements_sorted])
+        self.text = natural_text_elements(self.elements)
         self.has_bold = False
         for el in self.elements:
             if el.has_bold:
@@ -477,60 +482,6 @@ class BaseElementGroup(BaseElement):
     def add_element(self, element: BaseElement):
         self.elements.append(element)
         self.fit_elements()
-
-
-class TableGroup(Rectangle):
-
-    elements: List[BaseElement]
-
-    def __init__(self, elements, field_add=""):
-
-        super().__init__(None, None, None, None)
-
-        self.elements = [] + elements
-        self.fit_elements(field_add)
-
-        self.data_area = None
-        self.line_items = []
-
-    def __str__(self):
-        el_str = ", ".join(["(" + str(x) + ")" for x in self.elements])
-        return "G: (x0: " + str(self.x0) + ", x1: " + str(self.x1) + ", y0: " + str(self.y0) + ", y1: " + str(
-            self.y1) + ", elements: [" + el_str + "])"
-
-    def __repr__(self):
-        el_str = ", ".join(["(" + str(x) + ")" for x in self.elements])
-        return "G: (x0: " + str(self.x0) + ", x1: " + str(self.x1) + ", y0: " + str(self.y0) + ", y1: " + str(
-            self.y1) + ", elements: [" + el_str + "])"
-
-    def put_element(self, element, field_add=""):
-
-        element.in_group = True
-        self.elements.append(element)
-        self.fit_elements(field_add)
-
-    def remove_element(self, element_or_index, field_add=""):
-
-        if isinstance(element_or_index, int):
-            self.elements[element_or_index].in_group = False
-            del (self.elements[element_or_index])
-        if isinstance(element_or_index, BaseElement):
-            element_or_index.in_group = False
-            found = None
-            for a in range(0, len(self.elements)):
-                if self.elements[a].is_identical(element_or_index):
-                    found = a
-                    break
-            if found is not None:
-                del (self.elements[found])
-        self.fit_elements(field_add)
-
-    def fit_elements(self, field_add=""):
-        new_area = make_area_from_elements(self.elements, field_add)
-        self.x0 = new_area.x0
-        self.x1 = new_area.x1
-        self.y0 = new_area.y0
-        self.y1 = new_area.y1
 
 
 class Area(Rectangle):
@@ -723,6 +674,59 @@ class Area(Rectangle):
         self_copy.fit_elements()
 
         return self_copy
+
+
+class TableGroup(Rectangle):
+
+    elements: List[Area]
+
+    def __init__(self, elements: List[Area], field_add=""):
+
+        super().__init__(None, None, None, None)
+
+        self.elements = [] + elements
+        self.fit_elements(field_add)
+
+        self.data_area = None
+        self.line_items = []
+
+    def __str__(self):
+        el_str = ", ".join(["(" + str(x) + ")" for x in self.elements])
+        return "G: (x0: " + str(self.x0) + ", x1: " + str(self.x1) + ", y0: " + str(self.y0) + ", y1: " + str(
+            self.y1) + ", elements: [" + el_str + "])"
+
+    def __repr__(self):
+        el_str = ", ".join(["(" + str(x) + ")" for x in self.elements])
+        return "G: (x0: " + str(self.x0) + ", x1: " + str(self.x1) + ", y0: " + str(self.y0) + ", y1: " + str(
+            self.y1) + ", elements: [" + el_str + "])"
+
+    def put_element(self, element, field_add=""):
+
+        element.in_group = True
+        self.elements.append(element)
+        self.fit_elements(field_add)
+
+    def remove_element(self, index: int, field_add=""):
+
+        self.elements[index].in_group = False
+        del (self.elements[index])
+        self.fit_elements(field_add)
+
+    def fit_elements(self, field_add=""):
+        new_area = make_area_from_elements(self.elements, field_add)
+        self.x0 = new_area.x0
+        self.x1 = new_area.x1
+        self.y0 = new_area.y0
+        self.y1 = new_area.y1
+
+    def elements_by_row(self) -> Dict[int, List[BaseElement]]:
+        output = {}
+        for area in self.elements:
+            for el in area.elements:
+                if el.row_index not in output:
+                    output[el.row_index] = []
+                output[el.row_index].append(el)
+        return output
 
 
 class LineItem:
@@ -1005,3 +1009,54 @@ class ExtractedPage:
     size: Rectangle
     elements: List[ExtractedPdfElement]
     paragraphs: List[ExtractedPdfElement]
+
+
+class NaturalTextHelper:
+    text_raw: Union[str, None]
+    lines: List[str]
+    lines_cleaned: List[str]
+
+    def __init__(self, pypdf_text: Optional[str]):
+        self.text_raw = pypdf_text
+        if pypdf_text is not None:
+            self.lines = pypdf_text.split("\n")
+            self.lines_cleaned = [self.clean_text_for_matching(x) for x in self.lines]
+
+    def clean_text_for_matching(self, string_val: str) -> str:
+        return re.sub(r'[^A-Za-z.,\d]', '', string_val).lower()
+
+    def has_line_items(self, group: TableGroup) -> bool:
+        for row_idx, items in group.elements_by_row().items():
+            items_sorted = sorted(items, key=lambda x: -x.x1)
+            if len(items_sorted) == 1:
+                last_item_text = self.clean_text_for_matching(items_sorted[0].text)
+            else:
+                last_item_text = self.clean_text_for_matching(items_sorted[1].text+items_sorted[0].text)
+            for line in self.lines_cleaned:
+                if line.endswith(last_item_text):
+                    return True
+        return False
+
+    def is_adjacent_percent(self, table: TableGroup, compare_area: Area) -> float:
+        all_rows = table.elements_by_row()
+        # go row by row
+        matches = 0
+        for row_idx, base_elements in all_rows.items():
+            relevant_elements = sorted([x for x in compare_area.elements if x.row_index == base_elements[0].row_index], key=lambda x: x.x0)
+            if len(relevant_elements) > 0:
+                if len(relevant_elements) == 1:
+                    text_li = self.clean_text_for_matching(relevant_elements[0].text)
+                else:
+                    text_li = self.clean_text_for_matching(relevant_elements[0].text + relevant_elements[1].text)
+
+                base_el_sorted = sorted(base_elements, key=lambda x: x.x0)
+                if len(base_elements) == 1:
+                    item_text = self.clean_text_for_matching(base_el_sorted[0].text)
+                else:
+                    item_text = self.clean_text_for_matching(base_el_sorted[0].text + base_el_sorted[1].text)
+
+                for line in self.lines_cleaned:
+                    if line.startswith(text_li) and item_text in line:
+                        matches += 1
+                        break
+        return matches / len(all_rows.keys())

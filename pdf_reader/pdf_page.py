@@ -5,7 +5,7 @@ import copy
 import numpy as np
 from pdfminer.layout import LTTextBox, LTTextLine, LTChar, Rect
 
-from pdf_reader.custom_dataclasses import Rectangle, BaseElement, Area, BaseElementGroup, LineItem, ValueItem, ExtractedTable, ExtractedPdfElement, PdfReaderConfig, TableGroup
+from pdf_reader.custom_dataclasses import Rectangle, BaseElement, Area, BaseElementGroup, LineItem, ValueItem, ExtractedTable, ExtractedPdfElement, PdfReaderConfig, TableGroup, NaturalTextHelper
 from pdf_reader.helper import is_number_cell, space_separator_thousands, comma_dot_separator_thousands, letter_len, is_year_cell, cell_type, is_date_cell, words_contained
 
 
@@ -106,14 +106,16 @@ class ParseePdfPage:
     scale_multiplier: float = 1
     elements_list: List[BaseElement]
     non_text_elements: List[BaseElement]
+    natural_text: NaturalTextHelper
 
-    def __init__(self, page_index: int, pdf_path: str, page_size_pdfminer: Rect, text_boxes: List[LTTextBox], config: PdfReaderConfig):
+    def __init__(self, page_index: int, pdf_path: str, page_size_pdfminer: Rect, text_boxes: List[LTTextBox], config: PdfReaderConfig, natural_text: NaturalTextHelper):
 
         self.page_index = page_index
         self.pdf_path = pdf_path
         self.config = config
         self._set_page_size(page_size_pdfminer)
         self._set_elements(text_boxes)
+        self.natural_text = natural_text
 
     def _get_page_size_multiplier(self, mediabox: Rect):
 
@@ -766,8 +768,13 @@ class ParseePdfPage:
             if x0 is not None:
                 g.data_area = Area(x0, x1, y0, y1)
 
-        # groups that have some text aligned to the left are a VALID table
-        self.groups = groups
+        # check that all groups have some line items
+        valid_groups = []
+        for k, g in enumerate(groups):
+            if self.natural_text.has_line_items(g):
+               valid_groups.append(k)
+
+        self.groups = [x for k, x in enumerate(groups) if k in valid_groups]
 
     def _find_columns_text(self, el_list, tolerance=0):
 
@@ -838,7 +845,7 @@ class ParseePdfPage:
                          "value_rows": value_rows})
 
         # criteria for scoring, min letter len of line item of 6
-        scoring_weights = {"words": 5, "distance": 1, "completeness": 5}
+        scoring_weights = {"words": 5, "distance": 1, "completeness": 5, "natural_text_fits": 8}
         chosen_bordering_area = {}
         for g_index, g in enumerate(self.groups):
             # if only one candidate, take that
@@ -856,6 +863,7 @@ class ParseePdfPage:
                         candidate_dict['value_rows'])
                     candidate_dict['scoring']['distance'] = 1 if len(candidates_by_group[g_index]) == 1 else 1 - (
                                 k / (len(candidates_by_group[g_index]) - 1))
+                    candidate_dict['scoring']['natural_text_fits'] = self.natural_text.is_adjacent_percent(g, candidate_dict['overlapping_elements_area'])
                     for key, weight in scoring_weights.items():
                         candidate_dict['scoring']['final_score'] += candidate_dict['scoring'][key] * weight
                 scores = [x['scoring']['final_score'] for x in candidates_by_group[g_index]]
@@ -1282,6 +1290,7 @@ class ParseePdfPage:
     def extract_text_and_tables(self, min_rows_numeric: int = 1, min_cols_numeric: int = 1, **kwargs) -> List[ExtractedPdfElement]:
         # launch table recognition
         tables = self.extract_tables(min_rows_numeric, min_cols_numeric)
+        return
 
         all_elements = []
         all_extracted_elements: List[ExtractedPdfElement] = []

@@ -76,6 +76,8 @@ def get_elements_from_pdf(pdf_path, detected_areas: Union[None, Dict[int, List[R
 
     for page_index, p in enumerate(pages):
         page_elements = p.extract_text_and_tables(**kwargs)
+        visualise_elements(p, p.groups, "/Users/thomasflassbeck/Desktop/temp/x")
+        continue
         areas = None
         if detected_areas is not None and page_index in detected_areas:
             areas = relative_areas_to_area_predictions(detected_areas[page_index], p.page_size.width(), p.page_size.height())
