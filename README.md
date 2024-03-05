@@ -22,3 +22,7 @@ Extracting tables and paragraphs of text can be done in one line:
 
     from pdf_reader import get_elements_from_pdf
     elements = get_elements_from_pdf("FILE_PATH")
+
+If you are processing a PDF that needs OCR but no elements or just very few are being returned, you can force OCR like this:
+    
+    elements = get_elements_from_pdf("FILE_PATH", force_ocr=True)
