@@ -4,6 +4,7 @@ from subprocess import call
 import tempfile
 import shutil
 
+import pypdf
 from pdfminer.pdfparser import PDFParser
 from pdfminer.pdfdocument import PDFDocument, PDFEncryptionError
 from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
@@ -12,7 +13,7 @@ from pdfminer.layout import LAParams, LTTextBox, LTTextLine, LTChar, LTFigure, L
 from pdfminer.pdfpage import PDFPage
 import pytesseract
 
-from pdf_reader.custom_dataclasses import PdfReaderConfig
+from pdf_reader.custom_dataclasses import PdfReaderConfig, NaturalTextHelper
 from pdf_reader.pdf_page import ParseePdfPage
 from pdf_reader.helper import make_images_from_pdf
 
@@ -31,7 +32,7 @@ def decrypt_pdf_with_qpdf(path):
     os.rename(repaired_file_path, path)
 
 
-def open_pdf(pdf_path: str) -> Tuple[PDFDocument, PDFPageInterpreter, PDFPageAggregator, any]:
+def open_pdf(pdf_path: str) -> Tuple[PDFDocument, PDFPageInterpreter, PDFPageAggregator, any, pypdf.PdfReader]:
     # Open a PDF file.
     fp = open(pdf_path, 'rb')
     # Create a PDF parser object associated with the file object.
@@ -56,12 +57,22 @@ def open_pdf(pdf_path: str) -> Tuple[PDFDocument, PDFPageInterpreter, PDFPageAgg
     device = PDFPageAggregator(rsrcmgr, laparams=laparams)
     # Create a PDF interpreter object.
     interpreter = PDFPageInterpreter(rsrcmgr, device)
-    return document, interpreter, device, fp
+    # pypdf
+    pypdf_reader = pypdf.PdfReader(pdf_path)
+    return document, interpreter, device, fp, pypdf_reader
+
+
+def get_natural_text(reader: pypdf.PdfReader, page_index: int) -> NaturalTextHelper:
+    try:
+        pypdf_text = reader.pages[page_index].extract_text()
+    except Exception:
+        pypdf_text = None
+    return NaturalTextHelper(pypdf_text)
 
 
 def get_pdf_pages(pdf_path: str, config: Optional[PdfReaderConfig] = None, force_ocr: bool = False, **kwargs) -> List[ParseePdfPage]:
     config = PdfReaderConfig(None, None, None) if config is None else config
-    document, interpreter, device, fp = open_pdf(pdf_path)
+    document, interpreter, device, fp, pypdf_reader = open_pdf(pdf_path)
     pages = []
     for page_index, page in enumerate(PDFPage.create_pages(document)):
         interpreter.process_page(page)
@@ -69,10 +80,10 @@ def get_pdf_pages(pdf_path: str, config: Optional[PdfReaderConfig] = None, force
         text_boxes = parse_layout(layout)
         run_ocr = force_ocr or needs_ocr(text_boxes)
         if run_ocr:
-            mediabox, text_boxes = repair_layout(pdf_path, page_index)
-            page_obj = ParseePdfPage(page_index, pdf_path, mediabox, text_boxes, config)
+            mediabox, text_boxes, pypdf_reader = repair_layout(pdf_path, page_index)
+            page_obj = ParseePdfPage(page_index, pdf_path, mediabox, text_boxes, config, get_natural_text(pypdf_reader, page_index))
         else:
-            page_obj = ParseePdfPage(page_index, pdf_path, page.mediabox, text_boxes, config)
+            page_obj = ParseePdfPage(page_index, pdf_path, page.mediabox, text_boxes, config, get_natural_text(pypdf_reader, page_index))
         pages.append(page_obj)
 
     fp.close()
@@ -112,7 +123,7 @@ def needs_ocr(text_boxes: List[LTTextBox]) -> bool:
     return False
 
 
-def repair_layout(path: str, page_index: int) -> Tuple[any, List[LTTextBox]]:
+def repair_layout(path: str, page_index: int) -> Tuple[any, List[LTTextBox], pypdf.PdfReader]:
 
     temp_folder = tempfile.TemporaryDirectory()
     temp_folder_path = temp_folder.name
@@ -128,7 +139,7 @@ def repair_layout(path: str, page_index: int) -> Tuple[any, List[LTTextBox]]:
     f.write(bytearray(pdf))
     f.close()
 
-    document, interpreter, device, fp = open_pdf(pdf_path_tmp)
+    document, interpreter, device, fp, pypdf_reader = open_pdf(pdf_path_tmp)
     pages = [x for x in PDFPage.create_pages(document)]
     if len(pages) != 1:
         raise Exception("repaired PDF page does not have exactly one page")
@@ -140,4 +151,4 @@ def repair_layout(path: str, page_index: int) -> Tuple[any, List[LTTextBox]]:
     shutil.rmtree(temp_folder_path)
     boxes = parse_layout(layout)
     fp.close()
-    return page.mediabox, boxes
+    return page.mediabox, boxes, pypdf_reader

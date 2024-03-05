@@ -70,7 +70,6 @@ def make_paragraphs(elements: List[ExtractedPdfElement], config: PdfReaderConfig
 def get_elements_from_pdf(pdf_path, detected_areas: Union[None, Dict[int, List[RelativeAreaPrediction]]] = None, force_ocr: bool = False, **kwargs) -> List[ExtractedPage]:
 
     pages = get_pdf_pages(pdf_path, None, force_ocr, **kwargs)
-    pypdf_reader = pypdf.PdfReader(pdf_path)
 
     all_pages = []
 
@@ -79,11 +78,7 @@ def get_elements_from_pdf(pdf_path, detected_areas: Union[None, Dict[int, List[R
         areas = None
         if detected_areas is not None and page_index in detected_areas:
             areas = relative_areas_to_area_predictions(detected_areas[page_index], p.page_size.width(), p.page_size.height())
-        try:
-            pypdf_text = pypdf_reader.pages[page_index].extract_text()
-        except Exception:
-            pypdf_text = None
-        paragraphs = make_paragraphs(page_elements, PdfReaderConfig(20, 10, 6), areas, pypdf_text)
+        paragraphs = make_paragraphs(page_elements, PdfReaderConfig(20, 10, 6), areas, p.natural_text.text_raw)
         all_pages.append(ExtractedPage(page_index, p.page_size, page_elements, paragraphs))
 
     return all_pages

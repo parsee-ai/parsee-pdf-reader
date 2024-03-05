@@ -26,3 +26,6 @@ Extracting tables and paragraphs of text can be done in one line:
 If you are processing a PDF that needs OCR but no elements or just very few are being returned, you can force OCR like this:
     
     elements = get_elements_from_pdf("FILE_PATH", force_ocr=True)
+
+## Methodology
+Combines pdfminer, pypdf and tesseract and augments them with the introduction of table elements, which are treated separately from the rest of the text. As a result, the output contains basically two types of elements: tables and text paragraphs. We believe this separation is important as otherwise the tabular information is not extracted very precisely and concepts such as columns and rows are usually lost.

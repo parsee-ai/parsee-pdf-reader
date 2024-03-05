@@ -1,6 +1,7 @@
 import copy
 import json
 from typing import *
+import re
 from dataclasses import dataclass
 
 from pdf_reader.helper import clean_numeric_value
@@ -450,6 +451,11 @@ class BaseElement(Rectangle):
         self.row_index = min(self.row_index, element.row_index)
 
 
+def natural_text_elements(elements: List[BaseElement]) -> str:
+    elements_sorted = sorted(elements, key=lambda x: (x.row_index, x.x0))
+    return " ".join([x.text for x in elements_sorted])
+
+
 class BaseElementGroup(BaseElement):
 
     elements: List[BaseElement]
@@ -465,8 +471,7 @@ class BaseElementGroup(BaseElement):
         self.x1 = new_area.x1
         self.y0 = new_area.y0
         self.y1 = new_area.y1
-        elements_sorted = sorted(self.elements, key=lambda x: (x.row_index, x.x0))
-        self.text = " ".join([x.text for x in elements_sorted])
+        self.text = natural_text_elements(self.elements)
         self.has_bold = False
         for el in self.elements:
             if el.has_bold:
@@ -477,60 +482,6 @@ class BaseElementGroup(BaseElement):
     def add_element(self, element: BaseElement):
         self.elements.append(element)
         self.fit_elements()
-
-
-class TableGroup(Rectangle):
-
-    elements: List[BaseElement]
-
-    def __init__(self, elements, field_add=""):
-
-        super().__init__(None, None, None, None)
-
-        self.elements = [] + elements
-        self.fit_elements(field_add)
-
-        self.data_area = None
-        self.line_items = []
-
-    def __str__(self):
-        el_str = ", ".join(["(" + str(x) + ")" for x in self.elements])
-        return "G: (x0: " + str(self.x0) + ", x1: " + str(self.x1) + ", y0: " + str(self.y0) + ", y1: " + str(
-            self.y1) + ", elements: [" + el_str + "])"
-
-    def __repr__(self):
-        el_str = ", ".join(["(" + str(x) + ")" for x in self.elements])
-        return "G: (x0: " + str(self.x0) + ", x1: " + str(self.x1) + ", y0: " + str(self.y0) + ", y1: " + str(
-            self.y1) + ", elements: [" + el_str + "])"
-
-    def put_element(self, element, field_add=""):
-
-        element.in_group = True
-        self.elements.append(element)
-        self.fit_elements(field_add)
-
-    def remove_element(self, element_or_index, field_add=""):
-
-        if isinstance(element_or_index, int):
-            self.elements[element_or_index].in_group = False
-            del (self.elements[element_or_index])
-        if isinstance(element_or_index, BaseElement):
-            element_or_index.in_group = False
-            found = None
-            for a in range(0, len(self.elements)):
-                if self.elements[a].is_identical(element_or_index):
-                    found = a
-                    break
-            if found is not None:
-                del (self.elements[found])
-        self.fit_elements(field_add)
-
-    def fit_elements(self, field_add=""):
-        new_area = make_area_from_elements(self.elements, field_add)
-        self.x0 = new_area.x0
-        self.x1 = new_area.x1
-        self.y0 = new_area.y0
-        self.y1 = new_area.y1
 
 
 class Area(Rectangle):
@@ -725,6 +676,59 @@ class Area(Rectangle):
         return self_copy
 
 
+class TableGroup(Rectangle):
+
+    elements: List[Area]
+
+    def __init__(self, elements: List[Area], field_add=""):
+
+        super().__init__(None, None, None, None)
+
+        self.elements = [] + elements
+        self.fit_elements(field_add)
+
+        self.data_area = None
+        self.line_items = []
+
+    def __str__(self):
+        el_str = ", ".join(["(" + str(x) + ")" for x in self.elements])
+        return "G: (x0: " + str(self.x0) + ", x1: " + str(self.x1) + ", y0: " + str(self.y0) + ", y1: " + str(
+            self.y1) + ", elements: [" + el_str + "])"
+
+    def __repr__(self):
+        el_str = ", ".join(["(" + str(x) + ")" for x in self.elements])
+        return "G: (x0: " + str(self.x0) + ", x1: " + str(self.x1) + ", y0: " + str(self.y0) + ", y1: " + str(
+            self.y1) + ", elements: [" + el_str + "])"
+
+    def put_element(self, element, field_add=""):
+
+        element.in_group = True
+        self.elements.append(element)
+        self.fit_elements(field_add)
+
+    def remove_element(self, index: int, field_add=""):
+
+        self.elements[index].in_group = False
+        del (self.elements[index])
+        self.fit_elements(field_add)
+
+    def fit_elements(self, field_add=""):
+        new_area = make_area_from_elements(self.elements, field_add)
+        self.x0 = new_area.x0
+        self.x1 = new_area.x1
+        self.y0 = new_area.y0
+        self.y1 = new_area.y1
+
+    def elements_by_row(self) -> Dict[int, List[BaseElement]]:
+        output = {}
+        for area in self.elements:
+            for el in area.elements:
+                if el.row_index not in output:
+                    output[el.row_index] = []
+                output[el.row_index].append(el)
+        return output
+
+
 class LineItem:
 
     def __init__(self, el):
@@ -759,33 +763,9 @@ class LineItem:
         # update area
         self.area.init_with_elements(self.el_list)
 
-    def assign_values(self, value_el_list, type_el_list):
+    def assign_values(self, value_el_list):
         for k, v_el in enumerate(value_el_list):
             self.values.append(ValueItem(v_el))
-            self.value_types.append(type_el_list[k])
-
-        # determine validity and separator status
-
-        # valid = has caption & at least one numeric value
-        # if no caption, element is not valid
-        if self.el is None:
-            self.is_valid = False
-        if self.is_valid is None:
-            # checks if numeric value is present
-            for k, item_type in enumerate(self.value_types):
-                if item_type is not None and "num-value" in item_type:
-                    self.is_valid = True
-                    break
-        if self.is_valid is None:
-            self.is_valid = False
-
-        # whether the line item has values that make it act as separator for other line items
-        for k, item_type in enumerate(self.value_types):
-            if item_type is not None and "time-year" in item_type:
-                self.is_separator = True
-                break
-        if self.is_separator is None:
-            self.is_separator = False
 
     def first_non_empty_value(self):
         for v in self.values:
@@ -850,46 +830,6 @@ class ValueItem:
         }
 
 
-class MetaRow:
-
-    def __init__(self, el, c_overlap):
-        self.elements = []
-        self.area = Area(0, 0, 0, 0)
-        self.row_index = el.row_index
-        self.values = [None for _ in c_overlap]
-
-        self.add_el(el, c_overlap)
-
-    def __str__(self):
-        return "META: " + str(self.values)
-
-    def __repr__(self):
-        return self.__str__()
-
-    def dict(self):
-        return {
-            "a": self.area.list(),
-        }
-
-    def values_dict(self):
-        return [x.to_dict() if x is not None else {"type": "null"} for x in self.values]
-
-    def add_el(self, el, c_overlap):
-
-        self.elements.append(el)
-
-        for idx, overlap in enumerate(c_overlap):
-            if overlap > 0.1:
-                if self.values[idx] is None:
-                    self.values[idx] = el
-                else:
-                    # if value in cell is already occupied, merge them
-                    self.values[idx].merge(el)
-
-        # update area
-        self.area.init_with_elements(self.elements)
-
-
 class ExtractedTable(ExtractedPdfElement):
 
     table_area: Area
@@ -900,8 +840,6 @@ class ExtractedTable(ExtractedPdfElement):
         self.g_index = table_dict['g_index']
         self.items = []
         # meta info above columns
-        self.meta = []
-        self.meta_area = None
         # all base elements that collide with or inside the table but neither part of the line items or the column meta
         self.other_contained_elements = []
         self.num_rows = 0
@@ -937,7 +875,6 @@ class ExtractedTable(ExtractedPdfElement):
             "a": self.table_area.list(),
             "va": [v.list() for v in self.value_areas],
             "tva": self.total_value_area.list(),
-            "m": [m.values_dict() for m in self.meta]
         }
 
     def df_format(self):
@@ -974,29 +911,7 @@ class ExtractedTable(ExtractedPdfElement):
         self.total_value_area = Area(self.value_areas[0].x0, self.value_areas[-1].x1,
                                      min([x.y0 for x in self.value_areas]), max([x.y1 for x in self.value_areas]))
 
-        # adjust for meta dimension if available
-        if len(self.meta) > 0:
-            meta_y0 = min([m.area.y0 for m in self.meta])
-            meta_y1 = max([m.area.y1 for m in self.meta])
-            meta_x0 = min([m.area.x0 for m in self.meta])
-            meta_x1 = max([m.area.x1 for m in self.meta])
-
-            self.meta_area = Area(meta_x0, meta_x1, meta_y0, meta_y1)
-
-            table_y1 = max(meta_y1, table_y1)
-            table_x0 = min(meta_x0, table_x0)
-            table_x1 = max(meta_x1, table_x1)
-
         self.table_area = Area(table_x0, table_x1, table_y0, table_y1)
-
-    def add_meta_element(self, element, c_overlap):
-
-        if element.row_index not in [x.row_index for x in self.meta]:
-            self.meta.append(MetaRow(element, c_overlap))
-            self.meta = list(sorted(self.meta, key=lambda x: x.row_index))
-        else:
-            idx = [x.row_index for x in self.meta].index(element.row_index)
-            self.meta[idx].add_el(element, c_overlap)
 
 
 @dataclass
@@ -1005,3 +920,54 @@ class ExtractedPage:
     size: Rectangle
     elements: List[ExtractedPdfElement]
     paragraphs: List[ExtractedPdfElement]
+
+
+class NaturalTextHelper:
+    text_raw: Union[str, None]
+    lines: List[str]
+    lines_cleaned: List[str]
+
+    def __init__(self, pypdf_text: Optional[str]):
+        self.text_raw = pypdf_text
+        if pypdf_text is not None:
+            self.lines = pypdf_text.split("\n")
+            self.lines_cleaned = [self.clean_text_for_matching(x) for x in self.lines]
+
+    def clean_text_for_matching(self, string_val: str) -> str:
+        return re.sub(r'[^A-Za-z.,\d]', '', string_val).lower()
+
+    def has_line_items(self, group: TableGroup) -> bool:
+        for row_idx, items in group.elements_by_row().items():
+            items_sorted = sorted(items, key=lambda x: -x.x1)
+            if len(items_sorted) == 1:
+                last_item_text = self.clean_text_for_matching(items_sorted[0].text)
+            else:
+                last_item_text = self.clean_text_for_matching(items_sorted[1].text+items_sorted[0].text)
+            for line in self.lines_cleaned:
+                if line.endswith(last_item_text):
+                    return True
+        return False
+
+    def is_adjacent_percent(self, table: TableGroup, compare_area: Area) -> float:
+        all_rows = table.elements_by_row()
+        # go row by row
+        matches = 0
+        for row_idx, base_elements in all_rows.items():
+            relevant_elements = sorted([x for x in compare_area.elements if x.row_index == base_elements[0].row_index], key=lambda x: x.x0)
+            if len(relevant_elements) > 0:
+                if len(relevant_elements) == 1:
+                    text_li = self.clean_text_for_matching(relevant_elements[0].text)
+                else:
+                    text_li = self.clean_text_for_matching(relevant_elements[0].text + relevant_elements[1].text)
+
+                base_el_sorted = sorted(base_elements, key=lambda x: x.x0)
+                if len(base_elements) == 1:
+                    item_text = self.clean_text_for_matching(base_el_sorted[0].text)
+                else:
+                    item_text = self.clean_text_for_matching(base_el_sorted[0].text + base_el_sorted[1].text)
+
+                for line in self.lines_cleaned:
+                    if line.startswith(text_li) and item_text in line:
+                        matches += 1
+                        break
+        return matches / len(all_rows.keys())
