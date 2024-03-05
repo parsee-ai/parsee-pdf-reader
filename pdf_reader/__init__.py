@@ -1,1 +1,1 @@
-from pdf_reader.extract import get_elements_from_pdf
+from pdf_reader.extract import get_elements_from_pdf, visualise_pdf_output

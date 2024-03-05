@@ -4,10 +4,21 @@ This PDF reader was designed to overcome the common problems when trying to extr
 
 We started initially with a focus on financial/numeric tables, so this is where this PDF reader works best for.
 
+This is an early release, so we will be still making major changes.
+
 ## Installation
 
 Recommended install with poetry: https://python-poetry.org/docs/
 
-Alternatively: pip install parsee-pdf-reader
+    poetry add parsee-pdf-reader
 
-## PRE-RELEASE PUBLIC VERSION -> big changes to repo in coming days (Feb 2024), recommended to wait for public relase (end of Feb 2024)
+Alternatively:
+
+    pip install parsee-pdf-reader
+
+## Extracting Tables and Paragraphs
+
+Extracting tables and paragraphs of text can be done in one line:
+
+    from pdf_reader import get_elements_from_pdf
+    elements = get_elements_from_pdf("FILE_PATH")
