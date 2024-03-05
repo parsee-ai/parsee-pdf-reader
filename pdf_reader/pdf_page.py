@@ -6,7 +6,7 @@ import numpy as np
 from pdfminer.layout import LTTextBox, LTTextLine, LTChar, Rect
 
 from pdf_reader.custom_dataclasses import Rectangle, BaseElement, Area, BaseElementGroup, LineItem, ValueItem, ExtractedTable, ExtractedPdfElement, PdfReaderConfig, TableGroup, NaturalTextHelper
-from pdf_reader.helper import is_number_cell, space_separator_thousands, comma_dot_separator_thousands, letter_len, is_year_cell, cell_type, is_date_cell, words_contained
+from pdf_reader.helper import is_number_cell, space_separator_thousands, comma_dot_separator_thousands, letter_len, words_contained
 
 
 def filter_out_empty_columns(output_list, min_cols_numeric):
@@ -24,37 +24,6 @@ def filter_out_empty_columns(output_list, min_cols_numeric):
             del (output_list[table_index])
 
     return output_list
-
-
-def make_final_tables(table_dict):
-    final_tables = []
-    final_tables_indices = []
-
-    start_index = None
-    end_index = None
-
-    for idx, li in enumerate(table_dict['values']):
-        if li.is_valid and not li.is_separator:
-            if start_index is None:
-                start_index = idx
-            end_index = idx
-        elif li.is_separator and start_index is not None and end_index is not None:
-            # split table
-            final_tables_indices.append((start_index, end_index))
-            start_index = None
-            end_index = None
-
-        # last item
-        if idx == len(table_dict['values']) - 1 and start_index is not None and end_index is not None:
-            final_tables_indices.append((start_index, end_index))
-
-    for idx_tuple in final_tables_indices:
-        # filter out non valid items
-        final_tables.append({"g_index": table_dict['g_index'],
-                             "values": [x for x in table_dict['values'][idx_tuple[0]:idx_tuple[1] + 1] if
-                                        x.is_valid]})
-
-    return final_tables
 
 
 def has_collision_post_alignment(list1, list2, new_pos, vertical, take_min):
@@ -681,7 +650,7 @@ class ParseePdfPage:
                         area_obj.put_element(all_elements[k])
                         is_number_cell_check = is_number_cell(all_elements[k].text)
                         letter_len_check = letter_len(all_elements[k].text)
-                        if is_number_cell_check and not is_year_cell(all_elements[k].text):
+                        if is_number_cell_check:
                             num_numbers += 1
                         if not is_number_cell_check and letter_len_check > 0:
                             num_text += 1
@@ -1037,63 +1006,6 @@ class ParseePdfPage:
         # delete all line items that were used
         g.line_items = [li for k, li in enumerate(g.line_items) if k not in li_indices_to_delete]
 
-    def _find_meta_info(self, tables: List[ExtractedTable]):
-
-        for table_index, table in enumerate(tables):
-
-            # 1) look at all elements above table with certain distance
-            if len(table.items) == 0:
-                continue
-            # start at first row above first value row
-            max_row_index = table.items[0].el.row_index - 1
-            if max_row_index < 0:
-                continue
-            max_y0 = table.items[0].el.y1 + self.config.table_header_max_height
-
-            for row_index in range(max_row_index, -1, -1):
-
-                row = self.rows[row_index]
-
-                if row['y0_min'] > max_y0:
-                    break
-
-                part_of_table_prob = 1 - ((row['y0_min'] - table.items[0].el.y1) / self.config.table_header_max_height)
-
-                for k, base_el in enumerate(row['base_elements']):
-                    if base_el.x0 + self.config.table_sides_tolerance_x0 >= table.li_area.x0 and base_el.x1 - self.config.table_sides_tolerance_x1 <= \
-                            table.value_areas[-1].x1:
-                        # go through elements of base_element
-                        for el in base_el.elements:
-                            # check that element is not inside another table already
-                            collides = False
-                            for t2, table2 in enumerate(tables):
-                                if t2 != table_index and (
-                                        table2.table_area.is_inside(el) or table2.table_area.collides_with(el)):
-                                    collides = True
-                                    break
-                            if collides:
-                                continue
-
-                            # adjust li area a bit to account for meta info that is slightly outside of text
-                            li_area_copy = copy.deepcopy(table.li_area)
-                            li_area_copy.x0 -= self.config.table_sides_tolerance_x0
-                            c_overlap = el.h_overlap_percent([li_area_copy] + table.value_areas)
-
-                            # condition for distance: either close to table OR close to an element that was already identified as meta
-                            distance_condition = part_of_table_prob > 0.6 or (len(table.meta) > 0 and el.y0 - max(
-                                [x.area.y1 for x in table.meta]) <= self.config.line_break_distance)
-
-                            # check if element is overlapping entire table, make this check using base_el
-                            c_overlap_table = table.table_area.h_overlap_percent([base_el])
-                            overlap_condition = c_overlap_table[0] < 0.8
-
-                            # add to table if distance condition is met
-                            if distance_condition and overlap_condition:
-                                table.add_meta_element(el, c_overlap)
-
-            # refresh table areas to account for newly added meta elements
-            table.set_table_area()
-
     def extract_tables(self, min_rows_numeric: int = 1, min_cols_numeric: int = 1) -> List[ExtractedTable]:
 
         self._find_rows()
@@ -1112,10 +1024,7 @@ class ParseePdfPage:
             # sort elements
             g.elements = sorted(g.elements, key=lambda x: x.x1_el)
 
-            value_grid = {li.el.row_index: [None for _ in range(0, len(g.elements))] for li in g.line_items}
-
-            # rows can be blacklisted if 2 distinct numeric values should be put in a single cell and the row is at the top, because this means it's probably part of the header still
-            rows_blacklisted = []
+            value_grid = {row_index: [None for _ in range(0, len(g.elements))] for row_index in g.elements_by_row().keys()}
 
             for k, area in enumerate(g.elements):
 
@@ -1133,34 +1042,14 @@ class ParseePdfPage:
                             bounding_identical_check = bounding_identical
                             break
 
-                    if bounding_el is not None and bounding_el.row_index not in rows_blacklisted:
-
-                        # if bounding is not identical, double check that cell is really numeric
-                        if not bounding_identical_check:
-                            types, _ = cell_type(bounding_el.text)
-                            if "num-value" not in types:
-                                continue
+                    if bounding_el is not None:
 
                         # if bounding el contains more than one number cell, take the original element instead of bounding
                         if len([None for x in bounding_el.elements if is_number_cell(x.text)]) > 1:
                             bounding_el = el
 
-                        # check: element needs line item
+                        # check that element is really in grid
                         if bounding_el.row_index not in value_grid:
-                            continue
-
-                        # check: element can't contain a date
-                        if is_date_cell(bounding_el.text):
-                            continue
-
-                        # check: bounding el can't be part of line item
-                        cont = False
-                        for li in g.line_items:
-                            if li.el.row_index == bounding_el.row_index:
-                                if bounding_el.in_list(li.el_list):
-                                    cont = True
-                                break
-                        if cont:
                             continue
 
                         if value_grid[bounding_el.row_index][k] is None:
@@ -1168,29 +1057,11 @@ class ParseePdfPage:
                         else:
                             if value_grid[bounding_el.row_index][k].text == bounding_el.text:
                                 continue
-                            # there is an element in place already, overwrite if new el is number and old not
-                            if not is_number_cell(value_grid[bounding_el.row_index][k].text):
-                                if is_number_cell(bounding_el.text):
-                                    # overwrite
-                                    value_grid[bounding_el.row_index][k] = bounding_el
                             else:
-                                if is_number_cell(bounding_el.text):
-                                    # 2 distinct numeric values in same cell -> doesn't work
-                                    # check if we are at the top of the value grid, if so, blacklist this row as it's probably part of the header
-                                    value_grid_rows = [x for x in list(sorted(value_grid.keys())) if
-                                                       x not in rows_blacklisted]
-                                    if bounding_el.row_index == value_grid_rows[0]:
-                                        # set all cells to None in the row and blacklist row
-                                        rows_blacklisted.append(bounding_el.row_index)
-                                        for col_idx, _ in enumerate(g.elements):
-                                            value_grid[bounding_el.row_index][col_idx] = None
-                                    else:
-                                        print("2 distinct numeric values for same cell", "warning",
-                                                            (bounding_el, value_grid[bounding_el.row_index][k]))
-
-            type_grid = {
-                li.el.row_index: [cell_type(x.text)[0] if x is not None else None for x in value_grid[li.el.row_index]]
-                for li in g.line_items}
+                                # merge elements
+                                print("check, merging", value_grid[bounding_el.row_index][k], "XX", bounding_el)
+                                value_grid[bounding_el.row_index][k] = copy.deepcopy(value_grid[bounding_el.row_index][k])
+                                value_grid[bounding_el.row_index][k].merge(bounding_el)
 
             # assign values to line items
             final_table = {"g_index": g_index, "values": []}
@@ -1203,17 +1074,12 @@ class ParseePdfPage:
                         break
                 # create empty line item if not found
                 if chosen_li is None:
-                    chosen_li = LineItem(None)
-                chosen_li.assign_values(val_list, type_grid[row_index])
+                    chosen_li = LineItem(BaseElement(row_index=row_index))
+                chosen_li.assign_values(val_list)
                 final_table['values'].append(chosen_li)
 
-            # separate table if meta row inbetween and filter out rows with no numeric values
-            final_tables = make_final_tables(final_table)
-
             # separate table if li's too far away from each other
-            separate_final_tables = []
-            for table_dict in final_tables:
-                separate_final_tables += self._split_table_if_needed(table_dict)
+            separate_final_tables = self._split_table_if_needed(final_table)
 
             # filter out empty columns
             separate_final_tables = filter_out_empty_columns(separate_final_tables, min_cols_numeric)
@@ -1269,9 +1135,6 @@ class ParseePdfPage:
         # convert to table objects
         extracted_tables = [ExtractedTable(table) for table in tables]
 
-        # detect which elements are considered part of the table as meta elements
-        self._find_meta_info(extracted_tables)
-
         # sort
         extracted_tables = sorted(extracted_tables, key=lambda x: -x.table_area.y1)
 
@@ -1290,7 +1153,6 @@ class ParseePdfPage:
     def extract_text_and_tables(self, min_rows_numeric: int = 1, min_cols_numeric: int = 1, **kwargs) -> List[ExtractedPdfElement]:
         # launch table recognition
         tables = self.extract_tables(min_rows_numeric, min_cols_numeric)
-        return
 
         all_elements = []
         all_extracted_elements: List[ExtractedPdfElement] = []

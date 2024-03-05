@@ -763,33 +763,9 @@ class LineItem:
         # update area
         self.area.init_with_elements(self.el_list)
 
-    def assign_values(self, value_el_list, type_el_list):
+    def assign_values(self, value_el_list):
         for k, v_el in enumerate(value_el_list):
             self.values.append(ValueItem(v_el))
-            self.value_types.append(type_el_list[k])
-
-        # determine validity and separator status
-
-        # valid = has caption & at least one numeric value
-        # if no caption, element is not valid
-        if self.el is None:
-            self.is_valid = False
-        if self.is_valid is None:
-            # checks if numeric value is present
-            for k, item_type in enumerate(self.value_types):
-                if item_type is not None and "num-value" in item_type:
-                    self.is_valid = True
-                    break
-        if self.is_valid is None:
-            self.is_valid = False
-
-        # whether the line item has values that make it act as separator for other line items
-        for k, item_type in enumerate(self.value_types):
-            if item_type is not None and "time-year" in item_type:
-                self.is_separator = True
-                break
-        if self.is_separator is None:
-            self.is_separator = False
 
     def first_non_empty_value(self):
         for v in self.values:
@@ -852,46 +828,6 @@ class ValueItem:
             "c": self.currency.output_val() if self.currency is not None and self.val_clean is not None and currency_valid else None,
             "u": self.unit.output_val() if self.unit is not None and self.val_clean is not None else None
         }
-
-
-class MetaRow:
-
-    def __init__(self, el, c_overlap):
-        self.elements = []
-        self.area = Area(0, 0, 0, 0)
-        self.row_index = el.row_index
-        self.values = [None for _ in c_overlap]
-
-        self.add_el(el, c_overlap)
-
-    def __str__(self):
-        return "META: " + str(self.values)
-
-    def __repr__(self):
-        return self.__str__()
-
-    def dict(self):
-        return {
-            "a": self.area.list(),
-        }
-
-    def values_dict(self):
-        return [x.to_dict() if x is not None else {"type": "null"} for x in self.values]
-
-    def add_el(self, el, c_overlap):
-
-        self.elements.append(el)
-
-        for idx, overlap in enumerate(c_overlap):
-            if overlap > 0.1:
-                if self.values[idx] is None:
-                    self.values[idx] = el
-                else:
-                    # if value in cell is already occupied, merge them
-                    self.values[idx].merge(el)
-
-        # update area
-        self.area.init_with_elements(self.elements)
 
 
 class ExtractedTable(ExtractedPdfElement):
@@ -992,15 +928,6 @@ class ExtractedTable(ExtractedPdfElement):
             table_x1 = max(meta_x1, table_x1)
 
         self.table_area = Area(table_x0, table_x1, table_y0, table_y1)
-
-    def add_meta_element(self, element, c_overlap):
-
-        if element.row_index not in [x.row_index for x in self.meta]:
-            self.meta.append(MetaRow(element, c_overlap))
-            self.meta = list(sorted(self.meta, key=lambda x: x.row_index))
-        else:
-            idx = [x.row_index for x in self.meta].index(element.row_index)
-            self.meta[idx].add_el(element, c_overlap)
 
 
 @dataclass
