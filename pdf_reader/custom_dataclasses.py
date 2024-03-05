@@ -60,7 +60,6 @@ class Rectangle:
         self.y0 = y0
         self.y1 = y1
 
-        self.elements = []
         self.x0_el = None
         self.x1_el = None
         self.y0_el = None
@@ -75,9 +74,8 @@ class Rectangle:
             self.y1) + ")"
 
     def __repr__(self):
-        el_str = ", ".join(["(" + str(x) + ")" for x in self.elements])
         return "R: (x0: " + str(self.x0) + ", x1: " + str(self.x1) + ", y0: " + str(self.y0) + ", y1: " + str(
-            self.y1) + ", elements: [" + el_str + "])"
+            self.y1)
 
     def list(self):
         return [round(self.x0), round(self.x1), round(self.y0), round(self.y1)]
@@ -362,13 +360,134 @@ def make_area_from_elements(elements: List[Rectangle], field_add: str = "") -> R
     return Rectangle(min_x0, max_x1, min_y0, max_y1)
 
 
+class BaseElement(Rectangle):
+
+    def __init__(self, x0: int = 0, x1: int = 0, y0: int = 0, y1: int = 0, text: str = "", row_index: Optional[int] = None, has_bold: bool = False,
+                 scale_multiplier: float = 1):
+
+        super().__init__(int(x0 * scale_multiplier), int(x1 * scale_multiplier), int(y0 * scale_multiplier), int(y1 * scale_multiplier))
+
+        self.text = text
+        self.has_bold = has_bold
+
+        self.row_index = row_index
+
+        self.tolerance_detection = 1
+
+        self.in_group = False
+        self.linked_el = []
+
+    def __str__(self):
+        b_val = "True" if self.has_bold else "False"
+        return "t:'" + str(self.text) + "', x0: " + str(round(self.x0)) + ", x1: " + str(
+            round(self.x1)) + ", y0: " + str(round(self.y0)) + ", y1: " + str(round(self.y1)) + ", b: " + b_val + ""
+
+    def __repr__(self):
+        return str(self.text) + " (" + str(round(self.x0)) + "," + str(round(self.x1)) + "," + str(
+            round(self.y0)) + "," + str(round(self.y1)) + ")"
+
+    # convert data to dict so that it can be saved as e.g. JSON
+    def to_dict(self):
+        return {"type": "em", "a": self.list(), "t": self.text}
+
+    def to_extracted_element(self) -> ExtractedPdfElement:
+        return ExtractedPdfElement(self.x0, self.x1, self.y0, self.y1, self.to_dict())
+
+    def is_identical(self, element):
+
+        if round(element.x0) == round(self.x0) and round(element.x1) == round(self.x1) and round(element.y0) == round(
+                self.y0) and round(element.y1) == round(self.y1) and self.text == element.text:
+            return True
+        else:
+            return False
+
+    def in_list(self, el_list):
+        for el in el_list:
+            if self.is_identical(el):
+                return True
+        return False
+
+    def collides_with(self, element, field_add=""):
+
+        # make element a bit smaller for detection
+        x0_chosen = self.x0 + self.tolerance_detection
+        x1_chosen = self.x1 - self.tolerance_detection
+        y0_chosen = self.y0 + self.tolerance_detection
+        y1_chosen = self.y1 - self.tolerance_detection
+
+        hoverlaps = True
+        voverlaps = True
+        if (x0_chosen > element.x1) or (x1_chosen < element.x0):
+            hoverlaps = False
+        if (y1_chosen < element.y0) or (y0_chosen > element.y1):
+            voverlaps = False
+
+        return hoverlaps and voverlaps
+
+    def merge(self, element):
+
+        # change text
+        # check y position difference
+        y_diff = abs(element.y1 - self.y1)
+        if y_diff <= 2:
+            # same y position
+            if self.x0 < element.x0:
+                self.text = self.text + " " + element.text
+            else:
+                self.text = element.text + " " + self.text
+        else:
+            if element.y1 > self.y1:
+                self.text = element.text + " " + self.text
+            else:
+                self.text = self.text + " " + element.text
+
+        # change coordinates
+        self.x0 = element.x0 if element.x0 < self.x0 else self.x0
+        self.x1 = element.x1 if element.x1 > self.x1 else self.x1
+        self.y0 = element.y0 if element.y0 < self.y0 else self.y0
+        self.y1 = element.y1 if element.y1 > self.y1 else self.y1
+
+        self.row_index = min(self.row_index, element.row_index)
+
+
+class BaseElementGroup(BaseElement):
+
+    elements: List[BaseElement]
+
+    def __init__(self, elements: List[BaseElement]):
+        super().__init__()
+        self.elements = elements
+        self.fit_elements()
+
+    def fit_elements(self, field_add=""):
+        new_area = make_area_from_elements(self.elements, field_add)
+        self.x0 = new_area.x0
+        self.x1 = new_area.x1
+        self.y0 = new_area.y0
+        self.y1 = new_area.y1
+        elements_sorted = sorted(self.elements, key=lambda x: (x.row_index, x.x0))
+        self.text = " ".join([x.text for x in elements_sorted])
+        self.has_bold = False
+        for el in self.elements:
+            if el.has_bold:
+                self.has_bold = True
+                break
+        self.row_index = min([x.row_index for x in self.elements])
+
+    def add_element(self, element: BaseElement):
+        self.elements.append(element)
+        self.fit_elements()
+
+
 class TableGroup(Rectangle):
+
+    elements: List[BaseElement]
 
     def __init__(self, elements, field_add=""):
 
         super().__init__(None, None, None, None)
 
-        self.elements += elements
+        self.elements = [] + elements
         self.fit_elements(field_add)
 
         self.data_area = None
@@ -395,7 +514,7 @@ class TableGroup(Rectangle):
         if isinstance(element_or_index, int):
             self.elements[element_or_index].in_group = False
             del (self.elements[element_or_index])
-        if isinstance(element_or_index, ElementMiner):
+        if isinstance(element_or_index, BaseElement):
             element_or_index.in_group = False
             found = None
             for a in range(0, len(self.elements)):
@@ -416,9 +535,13 @@ class TableGroup(Rectangle):
 
 class Area(Rectangle):
 
+    elements: List[BaseElement]
+
     def __init__(self, x0=0, x1=0, y0=0, y1=0, tolerance_detection=3):
 
         super().__init__(x0, x1, y0, y1)
+
+        self.elements = []
 
         self.in_group = False
 
@@ -600,99 +723,6 @@ class Area(Rectangle):
         self_copy.fit_elements()
 
         return self_copy
-
-
-class ElementMiner(Rectangle):
-
-    def __init__(self, x0: int = 0, x1: int = 0, y0: int = 0, y1: int = 0, text: str = "", row_index: Optional[int] = None, has_bold: bool = False,
-                 scale_multiplier: float = 1):
-
-        super().__init__(int(x0 * scale_multiplier), int(x1 * scale_multiplier), int(y0 * scale_multiplier), int(y1 * scale_multiplier))
-
-        self.text = text
-        self.has_bold = has_bold
-
-        self.row_index = row_index
-        self.bounding_text = None
-
-        self.tolerance_detection = 1
-
-        self.in_group = False
-        self.linked_el = []
-
-    def __str__(self):
-        b_val = "True" if self.has_bold else "False"
-        return "t:'" + str(self.text) + "', x0: " + str(round(self.x0)) + ", x1: " + str(
-            round(self.x1)) + ", y0: " + str(round(self.y0)) + ", y1: " + str(round(self.y1)) + ", b: " + b_val + ""
-
-    def __repr__(self):
-        return str(self.text) + " (" + str(round(self.x0)) + "," + str(round(self.x1)) + "," + str(
-            round(self.y0)) + "," + str(round(self.y1)) + ")"
-
-    # convert data to dict so that it can be saved as e.g. JSON
-    def to_dict(self):
-        return {"type": "em", "a": self.list(), "t": self.text}
-
-    def to_extracted_element(self) -> ExtractedPdfElement:
-        return ExtractedPdfElement(self.x0, self.x1, self.y0, self.y1, self.to_dict())
-
-    def is_identical(self, element):
-
-        if round(element.x0) == round(self.x0) and round(element.x1) == round(self.x1) and round(element.y0) == round(
-                self.y0) and round(element.y1) == round(self.y1) and self.text == element.text:
-            return True
-        else:
-            return False
-
-    def in_list(self, el_list):
-        for el in el_list:
-            if self.is_identical(el):
-                return True
-        return False
-
-    def collides_with(self, element, field_add=""):
-
-        # make element a bit smaller for detection
-        x0_chosen = self.x0 + self.tolerance_detection
-        x1_chosen = self.x1 - self.tolerance_detection
-        y0_chosen = self.y0 + self.tolerance_detection
-        y1_chosen = self.y1 - self.tolerance_detection
-
-        hoverlaps = True
-        voverlaps = True
-        if (x0_chosen > element.x1) or (x1_chosen < element.x0):
-            hoverlaps = False
-        if (y1_chosen < element.y0) or (y0_chosen > element.y1):
-            voverlaps = False
-
-        return hoverlaps and voverlaps
-
-    def merge(self, element):
-
-        # change text
-        # check y position difference
-        y_diff = abs(element.y1 - self.y1)
-        if y_diff <= 2:
-            # same y position
-            if self.x0 < element.x0:
-                self.text = self.text + " " + element.text
-            else:
-                self.text = element.text + " " + self.text
-        else:
-            if element.y1 > self.y1:
-                self.text = element.text + " " + self.text
-            else:
-                self.text = self.text + " " + element.text
-
-        # change coordinates
-        self.x0 = element.x0 if element.x0 < self.x0 else self.x0
-        self.x1 = element.x1 if element.x1 > self.x1 else self.x1
-        self.y0 = element.y0 if element.y0 < self.y0 else self.y0
-        self.y1 = element.y1 if element.y1 > self.y1 else self.y1
-
-        self.row_index = min(self.row_index, element.row_index)
-
-        self.elements += element.elements
 
 
 class LineItem:

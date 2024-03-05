@@ -4,6 +4,7 @@ import pypdf
 
 from pdf_reader.custom_dataclasses import *
 from pdf_reader.converter import get_pdf_pages
+from pdf_reader.visualisation import visualise_elements
 
 
 def relative_areas_to_area_predictions(relative_areas: List[RelativeAreaPrediction], page_width: int, page_height: int) -> List[AreaPrediction]:
@@ -66,15 +67,15 @@ def make_paragraphs(elements: List[ExtractedPdfElement], config: PdfReaderConfig
 
 
 # returns a list of elements (text, tables) from a PDF
-def get_elements_from_pdf(pdf_path, detected_areas: Union[None, Dict[int, List[RelativeAreaPrediction]]] = None) -> List[ExtractedPage]:
+def get_elements_from_pdf(pdf_path, detected_areas: Union[None, Dict[int, List[RelativeAreaPrediction]]] = None, force_ocr: bool = False, **kwargs) -> List[ExtractedPage]:
 
-    pages = get_pdf_pages(pdf_path)
+    pages = get_pdf_pages(pdf_path, None, force_ocr, **kwargs)
     pypdf_reader = pypdf.PdfReader(pdf_path)
 
     all_pages = []
 
     for page_index, p in enumerate(pages):
-        page_elements = p.extract_text_and_tables()
+        page_elements = p.extract_text_and_tables(**kwargs)
         areas = None
         if detected_areas is not None and page_index in detected_areas:
             areas = relative_areas_to_area_predictions(detected_areas[page_index], p.page_size.width(), p.page_size.height())
@@ -86,3 +87,11 @@ def get_elements_from_pdf(pdf_path, detected_areas: Union[None, Dict[int, List[R
         all_pages.append(ExtractedPage(page_index, p.page_size, page_elements, paragraphs))
 
     return all_pages
+
+
+def visualise_pdf_output(pdf_path: str, output_path: str, force_ocr: bool = False, **kwargs):
+
+    pages = get_pdf_pages(pdf_path, None, force_ocr, **kwargs)
+    for page_index, p in enumerate(pages):
+        page_elements = p.extract_text_and_tables(**kwargs)
+        visualise_elements(p, page_elements, output_path)

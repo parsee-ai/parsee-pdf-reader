@@ -5,7 +5,7 @@ import copy
 import numpy as np
 from pdfminer.layout import LTTextBox, LTTextLine, LTChar, Rect
 
-from pdf_reader.custom_dataclasses import Rectangle, ElementMiner, Area, TableGroup, LineItem, ValueItem, ExtractedTable, ExtractedPdfElement, PdfReaderConfig
+from pdf_reader.custom_dataclasses import Rectangle, BaseElement, Area, BaseElementGroup, LineItem, ValueItem, ExtractedTable, ExtractedPdfElement, PdfReaderConfig, TableGroup
 from pdf_reader.helper import is_number_cell, space_separator_thousands, comma_dot_separator_thousands, letter_len, is_year_cell, cell_type, is_date_cell, words_contained
 
 
@@ -104,8 +104,8 @@ class ParseePdfPage:
     page_size: Rectangle
     config: PdfReaderConfig
     scale_multiplier: float = 1
-    elements_list: List[ElementMiner]
-    non_text_elements: List[ElementMiner]
+    elements_list: List[BaseElement]
+    non_text_elements: List[BaseElement]
 
     def __init__(self, page_index: int, pdf_path: str, page_size_pdfminer: Rect, text_boxes: List[LTTextBox], config: PdfReaderConfig):
 
@@ -227,8 +227,8 @@ class ParseePdfPage:
                                         new_x1 = c.x1
                                     if new_text != "" and new_x0 is not None and new_x1 is not None:
                                         self.elements_list.append(
-                                            ElementMiner(x0=new_x0, x1=new_x1, y0=new_y0, y1=new_y1, text=new_text,
-                                                         has_bold=has_bold, scale_multiplier=self.scale_multiplier))
+                                            BaseElement(x0=new_x0, x1=new_x1, y0=new_y0, y1=new_y1, text=new_text,
+                                                        has_bold=has_bold, scale_multiplier=self.scale_multiplier))
                                     has_bold = False
                                     if not break_now:
                                         new_text = ""
@@ -253,8 +253,8 @@ class ParseePdfPage:
                                 if kk == len(
                                         o._objs) - 1 and new_text != "" and new_x0 is not None and new_x1 is not None:
                                     self.elements_list.append(
-                                        ElementMiner(x0=new_x0, x1=new_x1, y0=new_y0, y1=new_y1, text=new_text,
-                                                     has_bold=has_bold, scale_multiplier=self.scale_multiplier))
+                                        BaseElement(x0=new_x0, x1=new_x1, y0=new_y0, y1=new_y1, text=new_text,
+                                                    has_bold=has_bold, scale_multiplier=self.scale_multiplier))
                                     # reset variables
                                     new_text = ""
                                     new_x0 = None
@@ -301,8 +301,8 @@ class ParseePdfPage:
                         new_x1 = c.x1
                     if new_text != "" and new_x0 is not None and new_x1 is not None:
                         self.elements_list.append(
-                            ElementMiner(x0=new_x0, x1=new_x1, y0=new_y0, y1=new_y1, text=new_text, has_bold=has_bold,
-                                         scale_multiplier=self.scale_multiplier))
+                            BaseElement(x0=new_x0, x1=new_x1, y0=new_y0, y1=new_y1, text=new_text, has_bold=has_bold,
+                                        scale_multiplier=self.scale_multiplier))
                     has_bold = False
                     if not break_now:
                         new_text = ""
@@ -324,15 +324,15 @@ class ParseePdfPage:
                     break_now = False
                 if kk == len(text_boxes) - 1 and new_text != "" and new_x0 is not None and new_x1 is not None:
                     self.elements_list.append(
-                        ElementMiner(x0=new_x0, x1=new_x1, y0=new_y0, y1=new_y1, text=new_text, has_bold=has_bold,
-                                     scale_multiplier=self.scale_multiplier))
+                        BaseElement(x0=new_x0, x1=new_x1, y0=new_y0, y1=new_y1, text=new_text, has_bold=has_bold,
+                                    scale_multiplier=self.scale_multiplier))
                     # no need to reset variables as end is reached anyway
             else:
                 # check if an element still has to be added
                 if new_text != "" and new_x0 is not None and new_x1 is not None:
                     self.elements_list.append(
-                        ElementMiner(x0=new_x0, x1=new_x1, y0=new_y0, y1=new_y1, text=new_text, has_bold=has_bold,
-                                     scale_multiplier=self.scale_multiplier))
+                        BaseElement(x0=new_x0, x1=new_x1, y0=new_y0, y1=new_y1, text=new_text, has_bold=has_bold,
+                                    scale_multiplier=self.scale_multiplier))
                     # reset variables
                     new_text = ""
                     new_x0 = None
@@ -340,8 +340,8 @@ class ParseePdfPage:
                     new_y0 = None
                     new_y1 = None
                 self.non_text_elements.append(
-                    ElementMiner(x0=element.x0, x1=element.x1, y0=element.y0, y1=element.y1, text="",
-                                 scale_multiplier=self.scale_multiplier))
+                    BaseElement(x0=element.x0, x1=element.x1, y0=element.y0, y1=element.y1, text="",
+                                scale_multiplier=self.scale_multiplier))
 
     def _clean_aligned(self, dict_el, key2_co, alignment_take_min=False, custom_tolerance=None, check_collision=True):
 
@@ -409,44 +409,25 @@ class ParseePdfPage:
 
         return {k: v for (k, v) in dict_el.items() if k not in to_del}
 
-    def _get_bounding_text_area(self, element, col_elements_exclude, ref_x0=None, ref_x1=None, text=None, handled=None,
-                               has_bold=None):
+    def _get_bounding_text_area(self, group: BaseElementGroup, col_elements_exclude, handled=None) -> Tuple[BaseElementGroup, List[BaseElement]]:
 
-        if ref_x0 is None:
-            ref_x0 = element.x0
-        if ref_x1 is None:
-            ref_x1 = element.x1
-        if text is None:
-            text = element.text
         if handled is None:
-            handled = [element]
-        if has_bold is None:
-            has_bold = element.has_bold
+            handled = [] + group.elements
 
-        row = self.rows[element.row_index]
+        row = self.rows[group.row_index]
 
         for el in row['list']:
-            if not element.is_identical(el) and not el.in_list(col_elements_exclude) and not el.in_list(handled):
-                if abs(el.x0 - ref_x1) <= self.config.SPACE_MAX_DISTANCE and el.x1 > ref_x1:
-                    ref_x1 = el.x1
-                    text += " " + el.text
+            if not el.in_list(group.elements) and not el.in_list(col_elements_exclude) and not el.in_list(handled):
+                if abs(el.x0 - group.x1) <= self.config.SPACE_MAX_DISTANCE and el.x1 > group.x1:
+                    group.add_element(el)
                     handled.append(el)
-                    if el.has_bold:
-                        has_bold = True
-                    return self._get_bounding_text_area(element, col_elements_exclude, ref_x0, ref_x1, text, handled,
-                                                       has_bold)
-                if abs(ref_x0 - el.x1) <= self.config.SPACE_MAX_DISTANCE and el.x0 < ref_x0:
-                    ref_x0 = el.x0
-                    text = el.text + " " + text
+                    return self._get_bounding_text_area(group, col_elements_exclude, handled)
+                if abs(group.x0 - el.x1) <= self.config.SPACE_MAX_DISTANCE and el.x0 < group.x0:
+                    group.add_element(el)
                     handled.append(el)
-                    if el.has_bold:
-                        has_bold = True
-                    return self._get_bounding_text_area(element, col_elements_exclude, ref_x0, ref_x1, text, handled,
-                                                       has_bold)
+                    return self._get_bounding_text_area(group, col_elements_exclude, handled)
 
-        output_el = ElementMiner(ref_x0, ref_x1, element.y0, element.y1, text, element.row_index, has_bold)
-
-        return output_el, handled
+        return group, handled
 
     def _find_rows(self):
 
@@ -489,7 +470,7 @@ class ParseePdfPage:
             for el in row['list']:
 
                 if el not in handled:
-                    new_el, handled = self._get_bounding_text_area(el, handled)
+                    new_el, handled = self._get_bounding_text_area(BaseElementGroup([el]), handled)
                     base_elements.append(new_el)
 
             row['base_elements'] = base_elements
@@ -537,9 +518,8 @@ class ParseePdfPage:
             el_list = []
             # remove elements that are inside a text block
             for kk, el in enumerate(col['list']):
-                bounding_text, _ = self._get_bounding_text_area(el, all_col_items)
+                bounding_text, _ = self._get_bounding_text_area(BaseElementGroup([el]), all_col_items)
                 if is_number_cell(bounding_text.text) or len(bounding_text.text) <= self.config.text_max_number_col:
-                    el.bounding_text = bounding_text
                     el_list.append(el)
 
             unbroken_areas = []
@@ -1159,7 +1139,6 @@ class ParseePdfPage:
 
                         # check: element needs line item
                         if bounding_el.row_index not in value_grid:
-                            print("WARNING: value has no line item", "warning", bounding_el)
                             continue
 
                         # check: element can't contain a date
@@ -1300,7 +1279,7 @@ class ParseePdfPage:
 
         return extracted_tables
 
-    def extract_text_and_tables(self, min_rows_numeric: int = 1, min_cols_numeric: int = 1) -> List[ExtractedPdfElement]:
+    def extract_text_and_tables(self, min_rows_numeric: int = 1, min_cols_numeric: int = 1, **kwargs) -> List[ExtractedPdfElement]:
         # launch table recognition
         tables = self.extract_tables(min_rows_numeric, min_cols_numeric)
 

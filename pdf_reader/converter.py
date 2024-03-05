@@ -59,7 +59,7 @@ def open_pdf(pdf_path: str) -> Tuple[PDFDocument, PDFPageInterpreter, PDFPageAgg
     return document, interpreter, device, fp
 
 
-def get_pdf_pages(pdf_path: str, config: Optional[PdfReaderConfig] = None) -> List[ParseePdfPage]:
+def get_pdf_pages(pdf_path: str, config: Optional[PdfReaderConfig] = None, force_ocr: bool = False, **kwargs) -> List[ParseePdfPage]:
     config = PdfReaderConfig(None, None, None) if config is None else config
     document, interpreter, device, fp = open_pdf(pdf_path)
     pages = []
@@ -67,7 +67,8 @@ def get_pdf_pages(pdf_path: str, config: Optional[PdfReaderConfig] = None) -> Li
         interpreter.process_page(page)
         layout = device.get_result()
         text_boxes = parse_layout(layout)
-        if needs_ocr(text_boxes):
+        run_ocr = force_ocr or needs_ocr(text_boxes)
+        if run_ocr:
             mediabox, text_boxes = repair_layout(pdf_path, page_index)
             page_obj = ParseePdfPage(page_index, pdf_path, mediabox, text_boxes, config)
         else:
