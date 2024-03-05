@@ -1034,12 +1034,10 @@ class ParseePdfPage:
 
                     # find bounding el in row
                     bounding_el = None
-                    bounding_identical_check = False
                     for bounding_el_row in self.rows[el.row_index]['base_elements']:
                         bounding_identical = bounding_el_row.is_identical(el)
                         if bounding_identical or el.in_list(bounding_el_row.elements):
                             bounding_el = bounding_el_row
-                            bounding_identical_check = bounding_identical
                             break
 
                     if bounding_el is not None:
@@ -1065,6 +1063,16 @@ class ParseePdfPage:
 
             # assign values to line items
             final_table = {"g_index": g_index, "values": []}
+            default_x0 = None
+            default_x1 = None
+            for li in g.line_items:
+                if default_x0 is None or li.el.x0 < default_x0:
+                    default_x0 = li.el.x0
+                if default_x1 is None or li.el.x1 > default_x1:
+                    default_x1 = li.el.x1
+            if default_x0 is None or default_x1 is None:
+                default_x0 = 0
+                default_x1 = 0
             for row_index, val_list in value_grid.items():
                 # find li
                 chosen_li = None
@@ -1074,7 +1082,10 @@ class ParseePdfPage:
                         break
                 # create empty line item if not found
                 if chosen_li is None:
-                    chosen_li = LineItem(BaseElement(row_index=row_index))
+                    default_el = next((item for item in val_list if item is not None), None)
+                    if default_el is None:
+                        default_el = self.rows[row_index]["base_elements"][0]
+                    chosen_li = LineItem(BaseElement(x0=default_x0, x1=default_x1, y0=default_el.y0, y1=default_el.y1, row_index=row_index))
                 chosen_li.assign_values(val_list)
                 final_table['values'].append(chosen_li)
 
@@ -1185,9 +1196,6 @@ class ParseePdfPage:
                             if not table_inserted:
                                 all_elements.append(t)
                                 all_extracted_elements.append(t)
-                        # check if element is in meta info
-                        if t.meta_area is not None and t.meta_area.is_inside(base_el):
-                            continue
                         # check if element is inside line item area
                         if t.li_area.is_inside(base_el):
                             continue

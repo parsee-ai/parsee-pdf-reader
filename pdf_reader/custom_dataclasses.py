@@ -840,8 +840,6 @@ class ExtractedTable(ExtractedPdfElement):
         self.g_index = table_dict['g_index']
         self.items = []
         # meta info above columns
-        self.meta = []
-        self.meta_area = None
         # all base elements that collide with or inside the table but neither part of the line items or the column meta
         self.other_contained_elements = []
         self.num_rows = 0
@@ -877,7 +875,6 @@ class ExtractedTable(ExtractedPdfElement):
             "a": self.table_area.list(),
             "va": [v.list() for v in self.value_areas],
             "tva": self.total_value_area.list(),
-            "m": [m.values_dict() for m in self.meta]
         }
 
     def df_format(self):
@@ -913,19 +910,6 @@ class ExtractedTable(ExtractedPdfElement):
 
         self.total_value_area = Area(self.value_areas[0].x0, self.value_areas[-1].x1,
                                      min([x.y0 for x in self.value_areas]), max([x.y1 for x in self.value_areas]))
-
-        # adjust for meta dimension if available
-        if len(self.meta) > 0:
-            meta_y0 = min([m.area.y0 for m in self.meta])
-            meta_y1 = max([m.area.y1 for m in self.meta])
-            meta_x0 = min([m.area.x0 for m in self.meta])
-            meta_x1 = max([m.area.x1 for m in self.meta])
-
-            self.meta_area = Area(meta_x0, meta_x1, meta_y0, meta_y1)
-
-            table_y1 = max(meta_y1, table_y1)
-            table_x0 = min(meta_x0, table_x0)
-            table_x1 = max(meta_x1, table_x1)
 
         self.table_area = Area(table_x0, table_x1, table_y0, table_y1)
 
