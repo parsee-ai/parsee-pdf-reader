@@ -932,6 +932,9 @@ class NaturalTextHelper:
         if pypdf_text is not None:
             self.lines = pypdf_text.split("\n")
             self.lines_cleaned = [self.clean_text_for_matching(x) for x in self.lines]
+        else:
+            self.lines = []
+            self.lines_cleaned = []
 
     def clean_text_for_matching(self, string_val: str) -> str:
         return re.sub(r'[^A-Za-z.,\d]', '', string_val).lower()

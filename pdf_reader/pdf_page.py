@@ -1057,7 +1057,6 @@ class ParseePdfPage:
                                 continue
                             else:
                                 # merge elements
-                                print("check, merging", value_grid[bounding_el.row_index][k], "XX", bounding_el)
                                 value_grid[bounding_el.row_index][k] = copy.deepcopy(value_grid[bounding_el.row_index][k])
                                 value_grid[bounding_el.row_index][k].merge(bounding_el)
 
