@@ -788,8 +788,6 @@ class ValueItem:
         self.val = el.text if el is not None else ""
         self.val_clean = None
         self.make_final_value()
-        self.currency = None
-        self.unit = None
 
     def __str__(self):
         return str(self.val)
@@ -809,24 +807,14 @@ class ValueItem:
 
         self.val_clean = clean_numeric_value(self.val)
 
-    def remove_meta(self):
-
-        self.currency = None
-        self.unit = None
-
     def dict(self, simple=False):
 
         if simple:
             return {"v": self.val_clean}
 
-        currency_valid = True
-        if self.unit is not None and (self.unit.output_val() == "p" or self.unit.output_val() == "u"):
-            currency_valid = False
-
         return {
-            "v": self.val_clean,
-            "c": self.currency.output_val() if self.currency is not None and self.val_clean is not None and currency_valid else None,
-            "u": self.unit.output_val() if self.unit is not None and self.val_clean is not None else None
+            "v": self.val,
+            "n": self.val_clean
         }
 
 
@@ -839,8 +827,6 @@ class ExtractedTable(ExtractedPdfElement):
 
         self.g_index = table_dict['g_index']
         self.items = []
-        # meta info above columns
-        # all base elements that collide with or inside the table but neither part of the line items or the column meta
         self.other_contained_elements = []
         self.num_rows = 0
         self.num_cols = 0
@@ -859,19 +845,11 @@ class ExtractedTable(ExtractedPdfElement):
     def __repr__(self):
         return self.__str__()
 
-    def dict_v2(self):
-
-        return {
-            "i": [li.dict() for li in self.items],
-            "a": self.table_area.list(),
-            "va": [v.list() for v in self.value_areas],
-        }
-
-    # convert data to dict so that it can be saved as e.g. JSON
     def to_dict(self):
+
         return {
             "type": "et",
-            "i": [li.dict(simple_values=True) for li in self.items],
+            "i": [li.dict() for li in self.items],
             "a": self.table_area.list(),
             "va": [v.list() for v in self.value_areas],
             "tva": self.total_value_area.list(),
