@@ -12,7 +12,7 @@ def relative_areas_to_area_predictions(relative_areas: List[RelativeAreaPredicti
     return sorted([AreaPrediction(x, page_width, page_height, k) for k, x in enumerate(relative_areas) if x.prob > 0.5], key=lambda x: -x.prob)
 
 
-def make_paragraphs(elements: List[ExtractedPdfElement], config: PdfReaderConfig, element_areas: Union[None, List[AreaPrediction]], all_text: Union[None, str]) -> List[ExtractedPdfElement]:
+def make_paragraphs(elements: List[ExtractedPdfElement], config: PdfReaderConfig, element_areas: Union[None, List[AreaPrediction]], all_text: Union[None, str], page_width: int) -> List[ExtractedPdfElement]:
     elements = sorted(elements, key=lambda x: x.y1, reverse=True)
     current_groups: List[PdfParagraph] = []
     all_groups: List[ExtractedPdfElement] = []
@@ -63,7 +63,7 @@ def make_paragraphs(elements: List[ExtractedPdfElement], config: PdfReaderConfig
     for figure in figures:
         all_groups.append(ExtractedFigure(figure.x0, figure.x1, figure.y0, figure.y1))
 
-    return list(sorted(all_groups, key=lambda el: (math.floor(el.x0 / 150), -(math.floor(el.y1 / 40)))))
+    return list(sorted(all_groups, key=lambda el: (1 if el.x0 > (page_width / 2) else 0, -(math.floor(el.y1 / 40)))))
 
 
 # returns a list of elements (text, tables) from a PDF
@@ -78,7 +78,7 @@ def get_elements_from_pdf(pdf_path, detected_areas: Union[None, Dict[int, List[R
         areas = None
         if detected_areas is not None and page_index in detected_areas:
             areas = relative_areas_to_area_predictions(detected_areas[page_index], p.page_size.width(), p.page_size.height())
-        paragraphs = make_paragraphs(page_elements, PdfReaderConfig(20, 10, 6), areas, p.natural_text.text_raw)
+        paragraphs = make_paragraphs(page_elements, PdfReaderConfig(20, 10, 6), areas, p.natural_text.text_raw, p.page_size.width())
         all_pages.append(ExtractedPage(page_index, p.page_size, page_elements, paragraphs))
 
     return all_pages
