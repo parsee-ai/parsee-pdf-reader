@@ -649,7 +649,47 @@ class TableGroup(Rectangle):
         return output
 
 
+class ValueItem:
+
+    def __init__(self, el):
+        self.el = el
+        self.val = el.text if el is not None else ""
+        self.val_clean = None
+        self.make_final_value()
+
+    def __str__(self):
+        return str(self.val)
+
+    def __repr__(self):
+        return self.__str__()
+
+    def is_empty(self):
+        if self.val == "":
+            return True
+        return False
+
+    def make_final_value(self):
+
+        if self.val == "":
+            return
+
+        self.val_clean = clean_numeric_value(self.val)
+
+    def dict(self, simple=False):
+
+        if simple:
+            return {"v": self.val_clean}
+
+        return {
+            "v": self.val,
+            "n": self.val_clean
+        }
+
+
 class LineItem:
+
+    caption: str
+    values: List[ValueItem]
 
     def __init__(self, el):
         self.el = copy.deepcopy(el)
@@ -701,43 +741,6 @@ class LineItem:
             "c": self.caption,
             "a": self.area.list(),
             "v": [v.dict(simple_values) for v in self.values]
-        }
-
-
-class ValueItem:
-
-    def __init__(self, el):
-        self.el = el
-        self.val = el.text if el is not None else ""
-        self.val_clean = None
-        self.make_final_value()
-
-    def __str__(self):
-        return str(self.val)
-
-    def __repr__(self):
-        return self.__str__()
-
-    def is_empty(self):
-        if self.val == "":
-            return True
-        return False
-
-    def make_final_value(self):
-
-        if self.val == "":
-            return
-
-        self.val_clean = clean_numeric_value(self.val)
-
-    def dict(self, simple=False):
-
-        if simple:
-            return {"v": self.val_clean}
-
-        return {
-            "v": self.val,
-            "n": self.val_clean
         }
 
 
