@@ -1213,6 +1213,6 @@ class ParseePdfPage:
                                                 break
                 # add text element
                 if not in_table:
-                    all_extracted_elements.append(base_el.to_extracted_element())
+                    all_extracted_elements.append(ExtractedPdfElement(base_el.x0, base_el.x1, base_el.y0, base_el.y1, base_el))
 
         return all_extracted_elements

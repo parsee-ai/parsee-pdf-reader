@@ -25,15 +25,15 @@ def make_paragraphs(elements: List[ExtractedPdfElement], config: PdfReaderConfig
 
     for el in elements:
         # check if el is contained in some detected area
-        el.dict_el["in_area"] = None
+        el.in_area = None
         for area in element_areas:
             if area.is_inside(el):
-                el.dict_el["in_area"] = area
+                el.in_area = area
                 break
-        if el.dict_el["in_area"] in figures:
+        if el.in_area in figures:
             # handle figures separately
             continue
-        if el.dict_el["type"] == "em":
+        if not isinstance(el, ExtractedTable):
             added_to_group = False
             # check if element can be added to a current group
             for n in range(len(current_groups) - 1, -1, -1):
@@ -44,7 +44,7 @@ def make_paragraphs(elements: List[ExtractedPdfElement], config: PdfReaderConfig
                     add_to_group = False
                     if current_groups[n].h_inside(el) or current_groups[n].h_overlap(el):
                         add_to_group = True
-                    elif current_groups[n].x_distance_to(el) <= config.SPACE_MAX_DISTANCE and el.dict_el["in_area"] is not None and el.dict_el["in_area"].class_id in current_groups[n].area_group_ids:
+                    elif current_groups[n].x_distance_to(el) <= config.SPACE_MAX_DISTANCE and el.in_area is not None and el.in_area.class_id in current_groups[n].area_group_ids:
                         add_to_group = True
                     elif natural_text is not None and current_groups[n].x_distance_to(el) <= config.SPACE_MAX_DISTANCE and (((current_groups[n].elements[-2].get_text() + " ") if len(current_groups[n].elements) > 1 else "") + current_groups[n].elements[-1].get_text()+" "+el.get_text() in natural_text):
                         add_to_group = True

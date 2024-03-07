@@ -245,88 +245,6 @@ class AreaPrediction(Rectangle):
         self.prob = relative_area.prob
 
 
-class ExtractedPdfElement(Rectangle):
-
-    def __init__(self, x0: int, x1: int, y0: int, y1: int, dict_el: Dict):
-        super().__init__(x0, x1, y0, y1)
-        self.dict_el: Dict = dict_el
-
-    def __str__(self):
-        return str(self.dict_el)
-
-    def __repr__(self):
-        return self.__str__()
-
-    def get_text(self) -> str:
-        return self.dict_el["t"] if "t" in self.dict_el else ""
-
-
-class ExtractedFigure(ExtractedPdfElement):
-
-    def __init__(self, x0: int, x1: int, y0: int, y1: int):
-        super().__init__(x0, x1, y0, y1, {"type": "ef"})
-
-    def __str__(self):
-        return str(self.dict_el)
-
-    def __repr__(self):
-        return self.__str__()
-
-    def get_text(self) -> str:
-        return "[figure]"
-
-
-class PdfParagraph(ExtractedPdfElement):
-
-    def __init__(self, elements: List[ExtractedPdfElement], config: PdfReaderConfig):
-        super().__init__(0, 0, 0, 0, {"type": "em"})
-        self.config = config
-        self.text = ""
-        self.line_break_char = "\n"
-        self.elements: List[ExtractedPdfElement] = elements
-        self.fit_area_from_elements()
-        self.add_text_from_elements()
-        self.area_group_ids = []
-
-    def __str__(self):
-        return self.text
-
-    def __repr__(self):
-        return str(self)
-
-    def get_text(self) -> str:
-        return self.text
-
-    def to_dict(self):
-        return {"text": self.text, "coordinates": self.dict_coordinates()}
-
-    def toJSON(self):
-        return json.dumps(self.to_dict())
-
-    def add_text_from_elements(self):
-        self.text = ""
-        elements_sorted = sorted(self.elements, key=lambda el: (-el.y1, el.x0))
-        for k, el in enumerate(elements_sorted):
-            if k > 0 and self.elements[k - 1].y1 - el.y1 > self.config.LINE_BREAK_MAX_DISTANCE:
-                self.text += self.line_break_char
-            elif k > 0:
-                self.text += " "
-            self.text += el.dict_el["t"]
-
-    def fit_area_from_elements(self):
-        area = make_area_from_elements(self.elements)
-        self.x0 = area.x0
-        self.x1 = area.x1
-        self.y0 = area.y0
-        self.y1 = area.y1
-        self.area_group_ids = set([el.dict_el["in_area"].class_id for el in self.elements if "in_area" in el.dict_el and el.dict_el["in_area"] is not None])
-
-    def add_el(self, el: ExtractedPdfElement):
-        self.elements.append(el)
-        self.fit_area_from_elements()
-        self.add_text_from_elements()
-
-
 class SingleChar(Rectangle):
 
     def __init__(self, x0, x1, y0, y1, text, scale_multiplier=1):
@@ -391,9 +309,6 @@ class BaseElement(Rectangle):
     # convert data to dict so that it can be saved as e.g. JSON
     def to_dict(self):
         return {"type": "em", "a": self.list(), "t": self.text}
-
-    def to_extracted_element(self) -> ExtractedPdfElement:
-        return ExtractedPdfElement(self.x0, self.x1, self.y0, self.y1, self.to_dict())
 
     def is_identical(self, element):
 
@@ -826,6 +741,139 @@ class ValueItem:
         }
 
 
+class NaturalTextHelper:
+    text_raw: Union[str, None]
+    lines: List[str]
+    lines_cleaned: List[str]
+
+    def __init__(self, pypdf_text: Optional[str]):
+        self.text_raw = pypdf_text
+        if pypdf_text is not None:
+            self.lines = pypdf_text.split("\n")
+            self.lines_cleaned = [self.clean_text_for_matching(x) for x in self.lines]
+        else:
+            self.lines = []
+            self.lines_cleaned = []
+
+    def clean_text_for_matching(self, string_val: str) -> str:
+        return re.sub(r'[^A-Za-z.,\d]', '', string_val).lower()
+
+    def has_line_items(self, group: TableGroup) -> bool:
+        for row_idx, items in group.elements_by_row().items():
+            items_sorted = sorted(items, key=lambda x: -x.x1)
+            if len(items_sorted) == 1:
+                last_item_text = self.clean_text_for_matching(items_sorted[0].text)
+            else:
+                last_item_text = self.clean_text_for_matching(items_sorted[1].text+items_sorted[0].text)
+            for line in self.lines_cleaned:
+                if line.endswith(last_item_text):
+                    return True
+        return False
+
+    def is_adjacent_percent(self, table: TableGroup, compare_area: Area) -> float:
+        all_rows = table.elements_by_row()
+        # go row by row
+        matches = 0
+        for row_idx, base_elements in all_rows.items():
+            relevant_elements = sorted([x for x in compare_area.elements if x.row_index == base_elements[0].row_index], key=lambda x: x.x0)
+            if len(relevant_elements) > 0:
+                if len(relevant_elements) == 1:
+                    text_li = self.clean_text_for_matching(relevant_elements[0].text)
+                else:
+                    text_li = self.clean_text_for_matching(relevant_elements[0].text + relevant_elements[1].text)
+
+                base_el_sorted = sorted(base_elements, key=lambda x: x.x0)
+                if len(base_elements) == 1:
+                    item_text = self.clean_text_for_matching(base_el_sorted[0].text)
+                else:
+                    item_text = self.clean_text_for_matching(base_el_sorted[0].text + base_el_sorted[1].text)
+
+                for line in self.lines_cleaned:
+                    if line.startswith(text_li) and item_text in line:
+                        matches += 1
+                        break
+        return matches / len(all_rows.keys())
+
+
+class ExtractedPdfElement(Rectangle):
+
+    el: Optional[BaseElement]
+    in_area: Optional[AreaPrediction]
+
+    def __init__(self, x0: int, x1: int, y0: int, y1: int, el: Optional[BaseElement]):
+        super().__init__(x0, x1, y0, y1)
+        self.el = el
+
+    def __str__(self):
+        return str(self.el.to_dict() if self.el is not None else None)
+
+    def __repr__(self):
+        return self.__str__()
+
+    def get_text(self) -> str:
+        return self.el.text if self.el is not None else ""
+
+
+class ExtractedFigure(ExtractedPdfElement):
+
+    def __init__(self, x0: int, x1: int, y0: int, y1: int):
+        super().__init__(x0, x1, y0, y1, None)
+
+    def get_text(self) -> str:
+        return "[figure]"
+
+
+class PdfParagraph(ExtractedPdfElement):
+
+    def __init__(self, elements: List[ExtractedPdfElement], config: PdfReaderConfig):
+        super().__init__(0, 0, 0, 0, None)
+        self.config = config
+        self.text = ""
+        self.line_break_char = "\n"
+        self.elements: List[ExtractedPdfElement] = elements
+        self.fit_area_from_elements()
+        self.add_text_from_elements()
+        self.area_group_ids = []
+
+    def __str__(self):
+        return self.text
+
+    def __repr__(self):
+        return str(self)
+
+    def get_text(self) -> str:
+        return self.text
+
+    def to_dict(self):
+        return {"text": self.text, "coordinates": self.dict_coordinates()}
+
+    def toJSON(self):
+        return json.dumps(self.to_dict())
+
+    def add_text_from_elements(self):
+        self.text = ""
+        elements_sorted = sorted(self.elements, key=lambda el: (-el.y1, el.x0))
+        for k, el in enumerate(elements_sorted):
+            if k > 0 and self.elements[k - 1].y1 - el.y1 > self.config.LINE_BREAK_MAX_DISTANCE:
+                self.text += self.line_break_char
+            elif k > 0:
+                self.text += " "
+            self.text += el.get_text()
+
+    def fit_area_from_elements(self):
+        area = make_area_from_elements(self.elements)
+        self.x0 = area.x0
+        self.x1 = area.x1
+        self.y0 = area.y0
+        self.y1 = area.y1
+        self.area_group_ids = set([el.in_area.class_id for el in self.elements if el.in_area is not None])
+
+    def add_el(self, el: ExtractedPdfElement):
+        self.elements.append(el)
+        self.fit_area_from_elements()
+        self.add_text_from_elements()
+
+
 class ExtractedTable(ExtractedPdfElement):
 
     table_area: Area
@@ -846,7 +894,7 @@ class ExtractedTable(ExtractedPdfElement):
         self.set_table_size()
         self.set_table_area()
 
-        super().__init__(self.table_area.x0, self.table_area.x1, self.table_area.y0, self.table_area.y1, self.to_dict())
+        super().__init__(self.table_area.x0, self.table_area.x1, self.table_area.y0, self.table_area.y1, None)
 
     def __str__(self):
         return "T: (r: " + str(self.num_rows) + ", c:" + str(self.num_cols) + ")"
@@ -912,57 +960,3 @@ class ExtractedPage:
     size: Rectangle
     elements: List[ExtractedPdfElement]
     paragraphs: List[ExtractedPdfElement]
-
-
-class NaturalTextHelper:
-    text_raw: Union[str, None]
-    lines: List[str]
-    lines_cleaned: List[str]
-
-    def __init__(self, pypdf_text: Optional[str]):
-        self.text_raw = pypdf_text
-        if pypdf_text is not None:
-            self.lines = pypdf_text.split("\n")
-            self.lines_cleaned = [self.clean_text_for_matching(x) for x in self.lines]
-        else:
-            self.lines = []
-            self.lines_cleaned = []
-
-    def clean_text_for_matching(self, string_val: str) -> str:
-        return re.sub(r'[^A-Za-z.,\d]', '', string_val).lower()
-
-    def has_line_items(self, group: TableGroup) -> bool:
-        for row_idx, items in group.elements_by_row().items():
-            items_sorted = sorted(items, key=lambda x: -x.x1)
-            if len(items_sorted) == 1:
-                last_item_text = self.clean_text_for_matching(items_sorted[0].text)
-            else:
-                last_item_text = self.clean_text_for_matching(items_sorted[1].text+items_sorted[0].text)
-            for line in self.lines_cleaned:
-                if line.endswith(last_item_text):
-                    return True
-        return False
-
-    def is_adjacent_percent(self, table: TableGroup, compare_area: Area) -> float:
-        all_rows = table.elements_by_row()
-        # go row by row
-        matches = 0
-        for row_idx, base_elements in all_rows.items():
-            relevant_elements = sorted([x for x in compare_area.elements if x.row_index == base_elements[0].row_index], key=lambda x: x.x0)
-            if len(relevant_elements) > 0:
-                if len(relevant_elements) == 1:
-                    text_li = self.clean_text_for_matching(relevant_elements[0].text)
-                else:
-                    text_li = self.clean_text_for_matching(relevant_elements[0].text + relevant_elements[1].text)
-
-                base_el_sorted = sorted(base_elements, key=lambda x: x.x0)
-                if len(base_elements) == 1:
-                    item_text = self.clean_text_for_matching(base_el_sorted[0].text)
-                else:
-                    item_text = self.clean_text_for_matching(base_el_sorted[0].text + base_el_sorted[1].text)
-
-                for line in self.lines_cleaned:
-                    if line.startswith(text_li) and item_text in line:
-                        matches += 1
-                        break
-        return matches / len(all_rows.keys())
