@@ -3,6 +3,7 @@ import json
 from typing import *
 import re
 from dataclasses import dataclass
+from functools import reduce
 
 from pdf_reader.helper import clean_numeric_value
 
@@ -488,15 +489,17 @@ class Area(Rectangle):
 
     elements: List[BaseElement]
 
-    def __init__(self, x0=0, x1=0, y0=0, y1=0, tolerance_detection=3):
+    def __init__(self, x0=0, x1=0, y0=0, y1=0, tolerance_detection=3, elements: Optional[List[BaseElement]] = None):
 
         super().__init__(x0, x1, y0, y1)
 
-        self.elements = []
+        self.elements = [] if elements is None else elements
 
         self.in_group = False
 
         self.tolerance_detection = tolerance_detection
+
+        self.all_row_indices = set()
 
     def __str__(self):
         el_str = ", ".join(["(" + str(x) + ")" for x in self.elements])
@@ -568,6 +571,7 @@ class Area(Rectangle):
 
     def fit_elements(self, el_fit=None):
 
+        self.all_row_indices = set()
         if el_fit is None:
             el_list = self.elements
         else:
@@ -582,6 +586,7 @@ class Area(Rectangle):
                 self.x1_el = el.x1
             if self.y1_el is None or el.y1 > self.y1_el:
                 self.y1_el = el.y1
+            self.all_row_indices.add(el.row_index)
 
     def refit_x_only(self):
 
@@ -737,7 +742,6 @@ class LineItem:
         self.internal_table_index = 0
         self.caption = el.text if el is not None else ""
         self.values = []
-        self.value_types = []
         self.area = Area(0, 0, 0, 0)
         if el is not None:
             self.area.init_with_elements([self.el])
@@ -762,6 +766,10 @@ class LineItem:
         self.caption = self.el.text if self.el is not None else ""
         # update area
         self.area.init_with_elements(self.el_list)
+
+    def add_value(self, el: BaseElement, col_idx: int):
+        if col_idx <= len(self.values)-1 and self.values[col_idx].is_empty():
+            self.values[col_idx] = ValueItem(el)
 
     def assign_values(self, value_el_list):
         for k, v_el in enumerate(value_el_list):
@@ -827,13 +835,14 @@ class ExtractedTable(ExtractedPdfElement):
 
         self.g_index = table_dict['g_index']
         self.items = []
-        self.other_contained_elements = []
+        self._items_by_row_idx = {}
         self.num_rows = 0
         self.num_cols = 0
         self.li_area = table_dict['li_area']
-        self.value_areas = table_dict['value_areas']
+        self.value_areas = list(sorted(table_dict['value_areas'], key=lambda x: x.x0))
         for li in table_dict['values']:
             self.items.append(li)
+            self._items_by_row_idx[li.el.row_index] = li
         self.set_table_size()
         self.set_table_area()
 
@@ -886,10 +895,15 @@ class ExtractedTable(ExtractedPdfElement):
         table_y1 = self.li_area.y1
         table_x1 = self.value_areas[-1].x1
 
+        all_elements = list(reduce(lambda acc, x: acc+x.elements, self.value_areas, []))
         self.total_value_area = Area(self.value_areas[0].x0, self.value_areas[-1].x1,
-                                     min([x.y0 for x in self.value_areas]), max([x.y1 for x in self.value_areas]))
+                                     min([x.y0 for x in self.value_areas]), max([x.y1 for x in self.value_areas]), elements=all_elements)
 
         self.table_area = Area(table_x0, table_x1, table_y0, table_y1)
+
+    def add_value(self, element: BaseElement, col_idx: int):
+        if element.row_index in self._items_by_row_idx:
+            self._items_by_row_idx[element.row_index].add_value(element, col_idx)
 
 
 @dataclass

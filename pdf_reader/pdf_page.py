@@ -1200,10 +1200,17 @@ class ParseePdfPage:
                             continue
                         # check if element is inside value area
                         if t.total_value_area.is_inside(base_el):
-                            continue
-                        # add element to other contained elements
-                        if base_el not in t.other_contained_elements:
-                            t.other_contained_elements.append(base_el)
+                            # check if element was placed
+                            if base_el not in t.total_value_area.elements:
+                                # try to place element
+                                for col_idx, area in enumerate(t.value_areas):
+                                    if area.collides_with(base_el) or area.is_inside(base_el):
+                                        if base_el not in area.elements:
+                                            # element is not placed yet, check if there is space
+                                            if base_el.row_index not in area.all_row_indices:
+                                                area.put_element(base_el)
+                                                t.add_value(base_el, col_idx)
+                                                break
                 # add text element
                 if not in_table:
                     all_extracted_elements.append(base_el.to_extracted_element())
