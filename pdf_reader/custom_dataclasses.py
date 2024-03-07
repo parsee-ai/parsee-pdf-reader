@@ -878,6 +878,7 @@ class ExtractedTable(ExtractedPdfElement):
 
     table_area: Area
     total_value_area: Area
+    items: List[LineItem]
 
     def __init__(self, table_dict):
 
