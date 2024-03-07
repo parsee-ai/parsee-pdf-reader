@@ -1197,7 +1197,9 @@ class ParseePdfPage:
                                 all_extracted_elements.append(t)
                         # check if element is inside line item area
                         if t.li_area.is_inside(base_el):
-                            continue
+                            # check if element was used
+                            if base_el.row_index not in t.non_empty_li_row_indices:
+                                in_table = False
                         # check if element is inside value area
                         if t.total_value_area.is_inside(base_el):
                             # check if element was placed
@@ -1211,6 +1213,7 @@ class ParseePdfPage:
                                                 area.put_element(base_el)
                                                 t.add_value(base_el, col_idx)
                                                 break
+                        break
                 # add text element
                 if not in_table:
                     all_extracted_elements.append(ExtractedPdfElement(base_el.x0, base_el.x1, base_el.y0, base_el.y1, base_el))

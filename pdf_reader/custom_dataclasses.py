@@ -888,6 +888,7 @@ class ExtractedTable(ExtractedPdfElement):
         self.g_index = table_dict['g_index']
         self.items = []
         self._items_by_row_idx = {}
+        self.non_empty_li_row_indices = set()
         self.num_rows = 0
         self.num_cols = 0
         self.li_area = table_dict['li_area']
@@ -895,6 +896,8 @@ class ExtractedTable(ExtractedPdfElement):
         for li in table_dict['values']:
             self.items.append(li)
             self._items_by_row_idx[li.el.row_index] = li
+            if li.caption == '':
+                self.non_empty_li_row_indices.add(li.el.row_index)
         self.set_table_size()
         self.set_table_area()
 
