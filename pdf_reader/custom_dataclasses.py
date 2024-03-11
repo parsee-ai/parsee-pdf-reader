@@ -896,7 +896,7 @@ class ExtractedTable(ExtractedPdfElement):
         for li in table_dict['values']:
             self.items.append(li)
             self._items_by_row_idx[li.el.row_index] = li
-            if li.caption == '':
+            if li.caption != '':
                 self.non_empty_li_row_indices.add(li.el.row_index)
         self.set_table_size()
         self.set_table_area()
