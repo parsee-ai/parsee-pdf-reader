@@ -108,14 +108,21 @@ def get_pdf_pages(pdf_path: str, config: Optional[PdfReaderConfig] = None, force
     return pages
 
 
-def parse_layout(layout_obj: any) -> List[LTTextBox]:
+def parse_layout(layout_obj: any, force_chars: bool = False) -> List[Union[LTTextBox, LTChar]]:
     all_relevant_elements = []
     """Function to recursively parse the layout tree and flatten LTFigure elements."""
     for lt_obj in layout_obj:
         if isinstance(lt_obj, LTFigure):
             all_relevant_elements += parse_layout(lt_obj)  # Recursive
         elif isinstance(lt_obj, LTTextBox):
+            if force_chars:
+                all_relevant_elements += parse_layout(lt_obj._objs)
+            else:
+                all_relevant_elements.append(lt_obj)
+        elif isinstance(lt_obj, LTChar):
             all_relevant_elements.append(lt_obj)
+        elif isinstance(lt_obj, LTTextLine):
+            all_relevant_elements += parse_layout(lt_obj._objs)
     return all_relevant_elements
 
 
@@ -167,7 +174,8 @@ def get_elements_from_image(image_path: str, custom_temp_folder_path: Optional[s
     # delete temporary folder and contents
     if custom_temp_folder_path is None:
         shutil.rmtree(temp_folder_path)
-    boxes = parse_layout(layout)
+    # use char level parsing for image output
+    boxes = parse_layout(layout, True)
     fp.close()
     return page.mediabox, boxes, pypdf_reader
 

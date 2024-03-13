@@ -77,7 +77,7 @@ class ParseePdfPage:
     non_text_elements: List[BaseElement]
     natural_text: NaturalTextHelper
 
-    def __init__(self, page_index: int, pdf_path: str, page_size_pdfminer: Rect, text_boxes: List[LTTextBox], config: PdfReaderConfig, natural_text: NaturalTextHelper):
+    def __init__(self, page_index: int, pdf_path: str, page_size_pdfminer: Rect, text_boxes: List[Union[LTTextBox, LTChar]], config: PdfReaderConfig, natural_text: NaturalTextHelper):
 
         self.page_index = page_index
         self.pdf_path = pdf_path
@@ -105,7 +105,7 @@ class ParseePdfPage:
         self.scale_multiplier = self._get_page_size_multiplier(page_size_pdfminer)
         self.page_size = Rectangle(int(page_size_pdfminer[0] * self.scale_multiplier), int(page_size_pdfminer[2] * self.scale_multiplier), int(page_size_pdfminer[1] * self.scale_multiplier), int(page_size_pdfminer[3] * self.scale_multiplier))
 
-    def _set_elements(self, text_boxes: List[LTTextBox]):
+    def _set_elements(self, text_boxes: List[Union[LTTextBox, LTChar]]):
 
         self.elements_list = []
         self.non_text_elements = []
