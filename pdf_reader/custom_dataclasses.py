@@ -595,6 +595,16 @@ class Area(Rectangle):
 
         return self_copy
 
+    def contains(self, element: BaseElement) -> bool:
+        for el in self.elements:
+            if el.is_identical(element):
+                return True
+            if isinstance(el, BaseElementGroup) and not isinstance(element, BaseElementGroup):
+                for el_contained in el.elements:
+                    if el_contained.is_identical(element):
+                        return True
+        return False
+
 
 class TableGroup(Rectangle):
 
@@ -664,7 +674,7 @@ class ValueItem:
         return self.__str__()
 
     def is_empty(self):
-        if self.val == "":
+        if self.val.strip() == "":
             return True
         return False
 
@@ -890,6 +900,7 @@ class ExtractedTable(ExtractedPdfElement):
     _items_by_row_idx: Dict[int, LineItem]
     num_rows: int
     num_cols: int
+    _DEFAULT_SPACE_COLS = 5
 
     def __init__(self, line_items: List[LineItem], g_index: int):
         super().__init__(0, 0, 0, 0, None)
@@ -988,6 +999,23 @@ class ExtractedTable(ExtractedPdfElement):
             area.init_with_elements(elements)
             self.value_areas.append(area)
 
+        # adjust value areas to extend full space they have, all but first col
+        self.value_areas = sorted(self.value_areas, key=lambda x: x.x0)
+        for a in range(len(self.value_areas) - 1, 0, -1):
+            self.value_areas[a].x0 = min(self.value_areas[a].x0,
+                                             self.value_areas[a - 1].x1 + self._DEFAULT_SPACE_COLS)
+            self.value_areas[a].y1 = max(self.value_areas[a].y1, self.line_item_area.y1)
+            self.value_areas[a].y0 = min(self.value_areas[a].y0, self.line_item_area.y0)
+        # first column
+        if len(self.value_areas) > 1:
+            self.value_areas[0].x0 = min(self.value_areas[0].x0,
+                                             self.value_areas[0].x1 - self.value_areas[1].width())
+            self.value_areas[0].y1 = max(self.value_areas[0].y1, self.line_item_area.y1)
+            self.value_areas[0].y0 = min(self.value_areas[0].y0, self.line_item_area.y0)
+        # line items: close gap to first li
+        if len(self.value_areas) > 0:
+            self.line_item_area.x1 = max(self.line_item_area.x1, self.value_areas[0].x0 - self._DEFAULT_SPACE_COLS)
+
     def set_table_size(self):
 
         self.num_cols = 0
@@ -998,6 +1026,11 @@ class ExtractedTable(ExtractedPdfElement):
     def add_value(self, element: BaseElement, col_idx: int):
         if element.row_index in self._items_by_row_idx:
             self._items_by_row_idx[element.row_index].add_value(element, col_idx)
+
+    def remove_column(self, column_index: int):
+        for li in self.items:
+            del (li.values[column_index])
+        self.set_line_items(self.items)
 
 
 @dataclass

@@ -9,18 +9,17 @@ from pdf_reader.custom_dataclasses import Rectangle, BaseElement, Area, BaseElem
 from pdf_reader.helper import is_number_cell, space_separator_thousands, comma_dot_separator_thousands, letter_len, words_contained
 
 
-def filter_out_empty_columns(output_list, min_cols_numeric):
+def filter_out_empty_columns(output_list: List[ExtractedTable], min_cols_numeric: int) -> List[ExtractedTable]:
     # filter out columns which have only None values
     for table_index in range(len(output_list) - 1, -1, -1):
-        table_dict = output_list[table_index]
-        if len(table_dict['values']) > 0:
-            for col_index in range(len(table_dict['values'][0].values) - 1, -1, -1):
-                if len([li.values[col_index] for li in table_dict['values'] if
-                        li.values[col_index].is_empty()]) == len(table_dict['values']):
+        table = output_list[table_index]
+        if len(table.items) > 0:
+            for col_index in range(len(table.items[0].values) - 1, -1, -1):
+                if len([li.values[col_index] for li in table.items if
+                        li.values[col_index].is_empty()]) == len(table.items):
                     # splice column
-                    for li in table_dict['values']:
-                        del (li.values[col_index])
-        if len(table_dict['values']) == 0 or len(table_dict['values'][0].values) < min_cols_numeric:
+                    table.remove_column(col_index)
+        if len(table.items) == 0 or len(table.items[0].values) < min_cols_numeric:
             del (output_list[table_index])
 
     return output_list
@@ -934,6 +933,7 @@ class ParseePdfPage:
 
         return top, bot
 
+    # TODO: adjust
     def _consolidate_li_captions(self, g):
 
         line_item_area = None
@@ -1005,7 +1005,7 @@ class ParseePdfPage:
         # delete all line items that were used
         g.line_items = [li for k, li in enumerate(g.line_items) if k not in li_indices_to_delete]
 
-    def extract_tables(self, min_rows_numeric: int = 1, min_cols_numeric: int = 1) -> List[ExtractedTable]:
+    def extract_tables(self, min_rows: int = 1, min_cols: int = 1) -> List[ExtractedTable]:
 
         self._find_rows()
         self._find_columns_numeric()
@@ -1017,7 +1017,7 @@ class ParseePdfPage:
 
         for g_index, g in enumerate(self.groups):
 
-            if len(g.elements) < min_cols_numeric:
+            if len(g.elements) < min_cols:
                 continue
 
             # sort elements
@@ -1069,77 +1069,28 @@ class ParseePdfPage:
             separate_final_tables = self._split_table_if_needed(final_table)
 
             # filter out empty columns
-            separate_final_tables = filter_out_empty_columns(separate_final_tables, min_cols_numeric)
+            separate_final_tables = filter_out_empty_columns(separate_final_tables, min_cols)
 
-            # consolidate line item captions if possible
-            self._consolidate_li_captions(g)
-
-            for t in separate_final_tables:
-                tables.append(t)
-
-        # make table areas
-        for t_index, table in enumerate(tables):
-            li_area = Area(0, 0, 0, 0)
-            li_area.init_with_elements([li.el for li in table['values']])
-            table['li_area'] = li_area
-            areas_temp = [[] for _ in table['values'][0].values]
-            table['value_areas'] = []
-            for li in table['values']:
-                for col_index, val in enumerate(li.values):
-                    areas_temp[col_index].append(val.el)
-            for col in areas_temp:
-                val_area = Area(0, 0, 0, 0)
-                val_area.init_with_elements(col)
-                table['value_areas'].append(val_area)
-
-            # adjust value areas to extend full space they have, all but first col
-            table['value_areas'] = sorted(table['value_areas'], key=lambda x: x.x0)
-            for a in range(len(table['value_areas']) - 1, 0, -1):
-                table['value_areas'][a].x0 = min(table['value_areas'][a].x0,
-                                                 table['value_areas'][a - 1].x1 + self.config.SPACE_MAX_DISTANCE)
-                table['value_areas'][a].y1 = max(table['value_areas'][a].y1, table['li_area'].y1)
-                table['value_areas'][a].y0 = min(table['value_areas'][a].y0, table['li_area'].y0)
-            # first column
-            if len(table['value_areas']) > 1:
-                table['value_areas'][0].x0 = min(table['value_areas'][0].x0,
-                                                 table['value_areas'][0].x1 - table['value_areas'][1].width())
-                table['value_areas'][0].y1 = max(table['value_areas'][0].y1, table['li_area'].y1)
-                table['value_areas'][0].y0 = min(table['value_areas'][0].y0, table['li_area'].y0)
-            # line items: close gap to first li
-            if len(table['value_areas']) > 0:
-                table['li_area'].x1 = max(table['li_area'].x1, table['value_areas'][0].x0 - self.config.SPACE_MAX_DISTANCE)
-
-            # check in new value cells if some unaligned numeric values can be found, where cell is currently empty
-            for li in table['values']:
-                for col_index, val in enumerate(li.values):
-                    if val.is_empty():
-                        search_row_index = li.el.row_index
-                        for el in self.rows[search_row_index]['base_elements']:
-                            if table['value_areas'][col_index].is_inside(el) and is_number_cell(el.text):
-                                li.values[col_index] = ValueItem(el)
-                                break
-
-        # convert to table objects
-        extracted_tables = [ExtractedTable(table) for table in tables]
+            tables += separate_final_tables
 
         # sort
-        extracted_tables = sorted(extracted_tables, key=lambda x: -x.table_area.y1)
+        tables = sorted(tables, key=lambda x: -x.table_area.y1)
 
         # discard tables with not enough rows
         to_del = []
-        for k, table in enumerate(extracted_tables):
-            if len(table.items) < min_rows_numeric:
+        for k, table in enumerate(tables):
+            if len(table.items) < min_rows:
                 to_del.append(k)
 
-        for k in range(len(extracted_tables) - 1, -1, -1):
+        for k in range(len(tables) - 1, -1, -1):
             if k in to_del:
-                del (extracted_tables[k])
+                del (tables[k])
 
-        return extracted_tables
+        return tables
 
-    def extract_text_and_tables(self, min_rows_numeric: int = 1, min_cols_numeric: int = 1, **kwargs) -> List[ExtractedPdfElement]:
+    def extract_text_and_tables(self, min_rows: int = 1, min_cols: int = 1, **kwargs) -> List[ExtractedPdfElement]:
         # launch table recognition
-        tables = self.extract_tables(min_rows_numeric, min_cols_numeric)
+        tables = self.extract_tables(min_rows, min_cols)
 
         all_elements = []
         all_extracted_elements: List[ExtractedPdfElement] = []
@@ -1154,7 +1105,7 @@ class ParseePdfPage:
                         # add table now also to all elements
                         if t not in all_elements:
                             table_inserted = False
-                            # CHECK FIRST IF TABLE WAS SPLIT, IF SO, SORT AFTER THE FIRST SPLITTED TABLE
+                            # CHECK FIRST IF TABLE WAS SPLIT, IF SO, SORT AFTER THE FIRST SPLIT TABLE
                             all_tables = [(k, x.g_index) for k, x in enumerate(all_elements) if
                                           isinstance(x, ExtractedTable)]
                             if t.g_index in [x[1] for x in all_tables]:
@@ -1173,9 +1124,11 @@ class ParseePdfPage:
                                 all_elements.append(t)
                                 all_extracted_elements.append(t)
                         # check if element is inside line item area
-                        if t.li_area.is_inside(base_el):
+                        if t.line_item_area.is_inside(base_el):
                             # check if element was used
-                            pass # TODO: FIX THIS
+                            if not t.line_item_area.contains(base_el):
+                                # TODO: merge line item captions
+                                pass
                         # check if element is inside value area
                         if t.total_value_area.is_inside(base_el):
                             # check if element was placed
