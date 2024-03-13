@@ -4,6 +4,7 @@ from subprocess import call
 import tempfile
 import shutil
 
+import magic
 import pypdf
 from pdfminer.pdfparser import PDFParser
 from pdfminer.pdfdocument import PDFDocument, PDFEncryptionError
@@ -16,6 +17,11 @@ import pytesseract
 from pdf_reader.custom_dataclasses import PdfReaderConfig, NaturalTextHelper
 from pdf_reader.pdf_page import ParseePdfPage
 from pdf_reader.helper import make_images_from_pdf
+
+
+def is_image(file_path: str):
+    file_type = magic.from_file(file_path, mime=True)
+    return file_type.startswith("image")
 
 
 def decrypt_pdf_with_qpdf(path):
@@ -72,6 +78,10 @@ def get_natural_text(reader: pypdf.PdfReader, page_index: int) -> NaturalTextHel
 
 def get_pdf_pages(pdf_path: str, config: Optional[PdfReaderConfig] = None, force_ocr: bool = False, **kwargs) -> List[ParseePdfPage]:
     config = PdfReaderConfig(None, None, None) if config is None else config
+    # check if file is an image
+    if is_image(pdf_path):
+        mediabox, text_boxes, pypdf_reader = get_elements_from_image(pdf_path)
+        return [ParseePdfPage(0, pdf_path, mediabox, text_boxes, config, get_natural_text(pypdf_reader, 0))]
     document, interpreter, device, fp, pypdf_reader = open_pdf(pdf_path)
     pages = []
     for page_index, page in enumerate(PDFPage.create_pages(document)):
@@ -123,19 +133,18 @@ def needs_ocr(text_boxes: List[LTTextBox]) -> bool:
     return False
 
 
-def repair_layout(path: str, page_index: int) -> Tuple[any, List[LTTextBox], pypdf.PdfReader]:
+def get_elements_from_image(image_path: str, custom_temp_folder_path: Optional[str] = None) -> Tuple[any, List[LTTextBox], pypdf.PdfReader]:
 
-    temp_folder = tempfile.TemporaryDirectory()
-    temp_folder_path = temp_folder.name
-
-    # save temporary image of PDF
-    target_height = 3200
-    img_path_tmp = make_images_from_pdf(path, temp_folder_path, [target_height], page_index)[target_height][0]
+    if custom_temp_folder_path is None:
+        temp_folder = tempfile.TemporaryDirectory()
+        temp_folder_path = temp_folder.name
+    else:
+        temp_folder_path = custom_temp_folder_path
 
     # start tesseract
     pdf_path_tmp = os.path.join(temp_folder_path, "ocr.pdf")
     f = open(pdf_path_tmp, "w+b")
-    pdf = pytesseract.image_to_pdf_or_hocr(img_path_tmp, extension='pdf')
+    pdf = pytesseract.image_to_pdf_or_hocr(image_path, extension='pdf')
     f.write(bytearray(pdf))
     f.close()
 
@@ -148,7 +157,22 @@ def repair_layout(path: str, page_index: int) -> Tuple[any, List[LTTextBox], pyp
     interpreter.process_page(page)
     layout = device.get_result()
     # delete temporary folder and contents
-    shutil.rmtree(temp_folder_path)
+    if custom_temp_folder_path is None:
+        shutil.rmtree(temp_folder_path)
     boxes = parse_layout(layout)
     fp.close()
     return page.mediabox, boxes, pypdf_reader
+
+
+def repair_layout(path: str, page_index: int) -> Tuple[any, List[LTTextBox], pypdf.PdfReader]:
+
+    temp_folder = tempfile.TemporaryDirectory()
+    temp_folder_path = temp_folder.name
+
+    # save temporary image of PDF
+    target_height = 3200
+    img_path_tmp = make_images_from_pdf(path, temp_folder_path, [target_height], page_index)[target_height][0]
+
+    output = get_elements_from_image(img_path_tmp, temp_folder_path)
+    shutil.rmtree(temp_folder_path)
+    return output
