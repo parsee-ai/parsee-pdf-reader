@@ -4,7 +4,6 @@ from subprocess import call
 import tempfile
 import shutil
 
-import magic
 import pypdf
 from pdfminer.pdfparser import PDFParser
 from pdfminer.pdfdocument import PDFDocument, PDFEncryptionError
@@ -19,9 +18,18 @@ from pdf_reader.pdf_page import ParseePdfPage
 from pdf_reader.helper import make_images_from_pdf
 
 
+"""
+Currently the image detection is not very sophisticated and goes purely by file extensions
+This is in order not to add some additional packages like python-magic just for this simple check
+"""
 def is_image(file_path: str):
-    file_type = magic.from_file(file_path, mime=True)
-    return file_type.startswith("image")
+    image_types_supported = ["png", "jpg", "jpeg"]
+    file_name = os.path.basename(file_path).lower()
+    if "." in file_name:
+        ending = file_name.rsplit(".", 1)
+        if ending[-1] in image_types_supported:
+            return True
+    return False
 
 
 def decrypt_pdf_with_qpdf(path):
