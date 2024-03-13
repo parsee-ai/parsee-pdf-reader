@@ -690,21 +690,23 @@ class LineItem:
 
     caption: str
     values: List[ValueItem]
+    base_elements: Set[BaseElement]
+    el: BaseElementGroup
 
-    def __init__(self, el):
-        self.el = copy.deepcopy(el)
-        self.el_list = [el]
-        self.internal_table_index = 0
-        self.caption = el.text if el is not None else ""
+    def __init__(self, el: Union[BaseElement, BaseElementGroup]):
+        self.base_elements = set()
+        if not isinstance(el, BaseElementGroup):
+            self.el = BaseElementGroup([el])
+            self.base_elements.add(el)
+        else:
+            self.el = BaseElementGroup(copy.copy(el.elements))
+            for e in el.elements:
+                self.base_elements.add(e)
+        self.caption = self.el.text
         self.values = []
-        self.area = Area(0, 0, 0, 0)
-        if el is not None:
-            self.area.init_with_elements([self.el])
-        self.is_valid = None
-        self.is_separator = None
 
     def __str__(self):
-        return "LI (" + str(self.internal_table_index) + "): " + str(self.caption) + "; values: " + str(self.values)
+        return "LI " + str(self.caption) + "; values: " + str(self.values)
 
     def __repr__(self):
         return self.__str__()
@@ -713,14 +715,14 @@ class LineItem:
         return False in [x.is_empty() for x in self.values]
 
     # adds element to line item
-    def add_el(self, el):
-        # merge main el
-        self.el.merge(el)
-        self.el_list.append(el)
-        # update caption
-        self.caption = self.el.text if self.el is not None else ""
-        # update area
-        self.area.init_with_elements(self.el_list)
+    def add_el(self, el: Union[BaseElement, BaseElementGroup]):
+        if not isinstance(el, BaseElementGroup):
+            self.el.add_element(el)
+            self.base_elements.add(el)
+        else:
+            for contained in el.elements:
+                self.el.add_element(contained)
+                self.base_elements.add(contained)
 
     def add_value(self, el: BaseElement, col_idx: int):
         if col_idx <= len(self.values)-1 and self.values[col_idx].is_empty():
@@ -739,7 +741,7 @@ class LineItem:
     def dict(self, simple_values=False):
         return {
             "c": self.caption,
-            "a": self.area.list(),
+            "a": self.el.list(),
             "v": [v.dict(simple_values) for v in self.values]
         }
 
@@ -881,25 +883,53 @@ class ExtractedTable(ExtractedPdfElement):
 
     table_area: Area
     total_value_area: Area
+    value_areas: List[Area]
+    line_item_area: Area
     items: List[LineItem]
+    g_index: int
+    _items_by_row_idx: Dict[int, LineItem]
+    num_rows: int
+    num_cols: int
 
-    def __init__(self, table_dict):
+    def __init__(self, line_items: List[LineItem], g_index: int):
+        super().__init__(0, 0, 0, 0, None)
+        self.g_index = g_index
+        self.set_line_items(line_items)
 
-        self.g_index = table_dict['g_index']
-        self.items = []
-        self._items_by_row_idx = {}
-        self.non_empty_li_row_indices = set()
-        self.num_rows = 0
-        self.num_cols = 0
-        self.li_area = table_dict['li_area']
-        self.value_areas = list(sorted(table_dict['value_areas'], key=lambda x: x.x0))
-        for li in table_dict['values']:
-            self.items.append(li)
-            self._items_by_row_idx[li.el.row_index] = li
-            if li.caption != '':
-                self.non_empty_li_row_indices.add(li.el.row_index)
+    def fill_empty_li(self, value_grid: Dict[int, List[List[Union[BaseElement, None]]]]):
+
+        final_li: List[LineItem] = []
+        for row_index, val_list in value_grid.items():
+            # find li
+            chosen_li = None
+            for li in self.items:
+                if li.el.row_index == row_index:
+                    chosen_li = li
+                    break
+            # create empty line item if not found
+            if chosen_li is None:
+                default_el = next((item for item in val_list if item is not None), None)
+                if default_el is None:
+                    raise Exception("empty values")
+                else:
+                    default_y0 = default_el.y0
+                    default_y1 = default_el.y1
+                chosen_li = LineItem(BaseElement(x0=self.line_item_area.x0, x1=self.line_item_area.x1, y0=default_y0, y1=default_y1, row_index=row_index))
+            chosen_li.assign_values(val_list)
+            final_li.append(chosen_li)
+
+        if len(final_li) != len(self.items):
+            self.set_line_items(final_li)
+
+    def set_line_items(self, line_items: List[LineItem]):
+
+        self.items = list(sorted(line_items, key=lambda x: x.el.row_index))
+        self.set_areas()
         self.set_table_size()
-        self.set_table_area()
+        self._items_by_row_idx = {}
+
+        for li in line_items:
+            self._items_by_row_idx[li.el.row_index] = li
 
         super().__init__(self.table_area.x0, self.table_area.x1, self.table_area.y0, self.table_area.y1, None)
 
@@ -935,26 +965,35 @@ class ExtractedTable(ExtractedPdfElement):
 
         return table_data
 
+    def set_areas(self):
+        self.line_item_area = Area()
+        self.total_value_area = Area()
+        self.table_area = Area()
+        self.value_areas = []
+        if len(self.items) == 0:
+            return
+        li_area_elements: List[BaseElement] = []
+        value_area_elements: List[List[BaseElement]] = [[] for _ in self.items[0].values]
+        for li in self.items:
+            li_area_elements.append(li.el)
+            for k, val in enumerate(li.values):
+                value_area_elements[k].append(val.el)
+        total_value_area_elements = reduce(lambda acc, x: acc + x, value_area_elements, [])
+        all_elements = total_value_area_elements + li_area_elements
+        self.line_item_area.init_with_elements(li_area_elements)
+        self.total_value_area.init_with_elements(total_value_area_elements)
+        self.table_area.init_with_elements(all_elements)
+        for elements in value_area_elements:
+            area = Area()
+            area.init_with_elements(elements)
+            self.value_areas.append(area)
+
     def set_table_size(self):
 
         self.num_cols = 0
         self.num_rows = len(self.items)
         if self.num_rows > 0:
             self.num_cols = len(self.items[0].values)
-
-    def set_table_area(self):
-
-        # set size of table area excluding header
-        table_x0 = self.li_area.x0
-        table_y0 = self.li_area.y0
-        table_y1 = self.li_area.y1
-        table_x1 = self.value_areas[-1].x1
-
-        all_elements = list(reduce(lambda acc, x: acc+x.elements, self.value_areas, []))
-        self.total_value_area = Area(self.value_areas[0].x0, self.value_areas[-1].x1,
-                                     min([x.y0 for x in self.value_areas]), max([x.y1 for x in self.value_areas]), elements=all_elements)
-
-        self.table_area = Area(table_x0, table_x1, table_y0, table_y1)
 
     def add_value(self, element: BaseElement, col_idx: int):
         if element.row_index in self._items_by_row_idx:

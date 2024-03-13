@@ -874,24 +874,23 @@ class ParseePdfPage:
 
             g.line_items = list(line_item_helper.values())
 
-    def _split_table_if_needed(self, table_dict):
+    def _split_table_if_needed(self, table: ExtractedTable) -> List[ExtractedTable]:
 
         output_list = []
 
-        table_dict['values'] = sorted(table_dict['values'], key=lambda li_obj: li_obj.el.row_index)
         split_table = False
-        for k, li in enumerate(table_dict['values']):
+        for k, li in enumerate(table.items):
             if k > 0:
-                if abs(table_dict['values'][k - 1].el.y0 - li.el.y1) > self.config.separate_table_distance:
+                if abs(table.items[k - 1].el.y0 - li.el.y1) > self.config.separate_table_distance:
                     split_table = True
-                    table_one = {"g_index": table_dict['g_index'], "values": table_dict['values'][0:k]}
+                    table_one = ExtractedTable(table.items[0:k], table.g_index)
                     output_list.append(table_one)
                     # table 2
-                    table_dict['values'] = table_dict['values'][k:]
-                    output_list += self._split_table_if_needed(table_dict)
+                    table_two = ExtractedTable(table.items[k:], table.g_index)
+                    output_list += self._split_table_if_needed(table_two)
                     break
         if not split_table:
-            output_list = [table_dict]
+            output_list = [table]
 
         return output_list
 
@@ -1060,33 +1059,11 @@ class ParseePdfPage:
                                 value_grid[bounding_el.row_index][k] = copy.deepcopy(value_grid[bounding_el.row_index][k])
                                 value_grid[bounding_el.row_index][k].merge(bounding_el)
 
-            # assign values to line items
-            final_table = {"g_index": g_index, "values": []}
-            default_x0 = None
-            default_x1 = None
-            for li in g.line_items:
-                if default_x0 is None or li.el.x0 < default_x0:
-                    default_x0 = li.el.x0
-                if default_x1 is None or li.el.x1 > default_x1:
-                    default_x1 = li.el.x1
-            if default_x0 is None or default_x1 is None:
-                default_x0 = 0
-                default_x1 = 0
-            for row_index, val_list in value_grid.items():
-                # find li
-                chosen_li = None
-                for li in g.line_items:
-                    if li.el.row_index == row_index:
-                        chosen_li = li
-                        break
-                # create empty line item if not found
-                if chosen_li is None:
-                    default_el = next((item for item in val_list if item is not None), None)
-                    if default_el is None:
-                        default_el = self.rows[row_index]["base_elements"][0]
-                    chosen_li = LineItem(BaseElement(x0=default_x0, x1=default_x1, y0=default_el.y0, y1=default_el.y1, row_index=row_index))
-                chosen_li.assign_values(val_list)
-                final_table['values'].append(chosen_li)
+            # create table elements
+            final_table = ExtractedTable(g.line_items, g_index)
+
+            # fill empty line items
+            final_table.fill_empty_li(value_grid)
 
             # separate table if li's too far away from each other
             separate_final_tables = self._split_table_if_needed(final_table)
@@ -1198,8 +1175,7 @@ class ParseePdfPage:
                         # check if element is inside line item area
                         if t.li_area.is_inside(base_el):
                             # check if element was used
-                            if base_el.row_index not in t.non_empty_li_row_indices:
-                                in_table = False
+                            pass # TODO: FIX THIS
                         # check if element is inside value area
                         if t.total_value_area.is_inside(base_el):
                             # check if element was placed
