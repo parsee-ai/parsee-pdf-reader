@@ -6,21 +6,20 @@ import numpy as np
 from pdfminer.layout import LTTextBox, LTTextLine, LTChar, Rect
 
 from pdf_reader.custom_dataclasses import Rectangle, BaseElement, Area, BaseElementGroup, LineItem, ValueItem, ExtractedTable, ExtractedPdfElement, PdfReaderConfig, TableGroup, NaturalTextHelper
-from pdf_reader.helper import is_number_cell, space_separator_thousands, comma_dot_separator_thousands, letter_len, words_contained
+from pdf_reader.helper import is_number_cell, letter_len, words_contained
 
 
-def filter_out_empty_columns(output_list, min_cols_numeric):
+def filter_out_empty_columns(output_list: List[ExtractedTable], min_cols: int) -> List[ExtractedTable]:
     # filter out columns which have only None values
     for table_index in range(len(output_list) - 1, -1, -1):
-        table_dict = output_list[table_index]
-        if len(table_dict['values']) > 0:
-            for col_index in range(len(table_dict['values'][0].values) - 1, -1, -1):
-                if len([li.values[col_index] for li in table_dict['values'] if
-                        li.values[col_index].is_empty()]) == len(table_dict['values']):
+        table = output_list[table_index]
+        if len(table.items) > 0:
+            for col_index in range(len(table.items[0].values) - 1, -1, -1):
+                if len([li.values[col_index] for li in table.items if
+                        li.values[col_index].is_empty()]) == len(table.items):
                     # splice column
-                    for li in table_dict['values']:
-                        del (li.values[col_index])
-        if len(table_dict['values']) == 0 or len(table_dict['values'][0].values) < min_cols_numeric:
+                    table.remove_column(col_index)
+        if len(table.items) == 0 or len(table.items[0].values) < min_cols:
             del (output_list[table_index])
 
     return output_list
@@ -110,27 +109,6 @@ class ParseePdfPage:
         self.elements_list = []
         self.non_text_elements = []
 
-        # first: check if page contains some space separated values and no other thousands separator
-        sp = 0
-        replace_space_separator = True
-        for element in text_boxes:
-            if isinstance(element, LTTextBox):
-                for o in element._objs:
-                    if isinstance(o, LTTextLine):
-                        try:
-                            text = o.get_text()
-                        except Exception as e:
-                            text = ""
-                        text_stripped = text.strip()
-                        if is_number_cell(text_stripped):
-                            if space_separator_thousands(text_stripped):
-                                sp += 1
-                            elif comma_dot_separator_thousands(text_stripped):
-                                replace_space_separator = False
-                                break
-        if sp == 0:
-            replace_space_separator = False
-
         # now collect elements
         new_text = ""
         new_x0 = None
@@ -187,12 +165,7 @@ class ParseePdfPage:
                                             has_bold = True
 
                                 # start new element
-                                if (t == " " or t == "\t" or t == ")" or break_now) and (
-                                        not replace_space_separator or not (
-                                        replace_space_separator and is_number_cell(
-                                    text_stripped) and space_separator_thousands(
-                                    text_stripped) and t == " " and kk > 0 and o._objs[
-                                            kk - 1].get_text() != " ")):
+                                if t == " " or t == "\t" or t == ")" or break_now:
                                     if t == ")":
                                         new_text += ")"
                                         new_x1 = c.x1
@@ -874,139 +847,27 @@ class ParseePdfPage:
 
             g.line_items = list(line_item_helper.values())
 
-    def _split_table_if_needed(self, table_dict):
+    def _split_table_if_needed(self, table: ExtractedTable) -> List[ExtractedTable]:
 
         output_list = []
 
-        table_dict['values'] = sorted(table_dict['values'], key=lambda li_obj: li_obj.el.row_index)
         split_table = False
-        for k, li in enumerate(table_dict['values']):
+        for k, li in enumerate(table.items):
             if k > 0:
-                if abs(table_dict['values'][k - 1].el.y0 - li.el.y1) > self.config.separate_table_distance:
+                if abs(table.items[k - 1].el.y0 - li.el.y1) > self.config.separate_table_distance:
                     split_table = True
-                    table_one = {"g_index": table_dict['g_index'], "values": table_dict['values'][0:k]}
+                    table_one = ExtractedTable(table.items[0:k], table.g_index)
                     output_list.append(table_one)
                     # table 2
-                    table_dict['values'] = table_dict['values'][k:]
-                    output_list += self._split_table_if_needed(table_dict)
+                    table_two = ExtractedTable(table.items[k:], table.g_index)
+                    output_list += self._split_table_if_needed(table_two)
                     break
         if not split_table:
-            output_list = [table_dict]
+            output_list = [table]
 
         return output_list
 
-    def _has_value_separator(self, li):
-
-        bot = False
-        top = False
-
-        if "........" in li.el.text or "________" in li.el.text:
-            bot = True
-
-        # check for separator above/below values
-        if len(li.values) > 0:
-            value_el = li.first_non_empty_value()
-            if value_el is not None:
-                el = value_el.el
-                for non_text_el in self.non_text_elements:
-                    # take only real lines
-                    if non_text_el.height() <= self.config.line_max_height and el.h_overlap(non_text_el):
-                        if el.y0 > non_text_el.y0 and (abs(el.y0 - non_text_el.y0) <= self.config.SPACE_MAX_DISTANCE or abs(
-                                el.y0 - non_text_el.y1) <= self.config.SPACE_MAX_DISTANCE):
-                            bot = True
-                        if el.y0 < non_text_el.y0 and (abs(el.y1 - non_text_el.y0) <= self.config.SPACE_MAX_DISTANCE or abs(
-                                el.y1 - non_text_el.y1) <= self.config.SPACE_MAX_DISTANCE):
-                            top = True
-                        if bot and top:
-                            return top, bot
-
-        # check also for line item itself
-        for non_text_el in self.non_text_elements:
-            # take only real lines
-            if non_text_el.height() <= self.config.line_max_height and li.el.h_overlap(non_text_el):
-                if li.el.y0 > non_text_el.y0 and (abs(li.el.y0 - non_text_el.y0) <= self.config.SPACE_MAX_DISTANCE or abs(
-                        li.el.y0 - non_text_el.y1) <= self.config.SPACE_MAX_DISTANCE):
-                    bot = True
-                if li.el.y0 < non_text_el.y0 and (abs(li.el.y1 - non_text_el.y0) <= self.config.SPACE_MAX_DISTANCE or abs(
-                        li.el.y1 - non_text_el.y1) <= self.config.SPACE_MAX_DISTANCE):
-                    top = True
-                if bot and top:
-                    break
-
-        return top, bot
-
-    def _consolidate_li_captions(self, g):
-
-        line_item_area = None
-        if len(g.line_items) > 0:
-            line_item_area = Area(0, 0, 0, 0)
-            line_item_area.init_with_elements([li.el for li in g.line_items])
-
-        # consolidate line item captions eventually
-        used_li_captions = []
-        li_indices_to_delete = []
-        for k, li in enumerate(g.line_items):
-            if li.has_line_item_values():
-
-                # check whether current li has separators above or below
-                separator_above, separator_below = self._has_value_separator(li)
-
-                if not separator_above:
-                    # ABOVE current li
-                    to_check_objs = []
-                    if k > 0:
-                        for a in range(k - 1, -1, -1):
-                            if not g.line_items[a].has_line_item_values() and g.line_items[
-                                a].el.row_index not in used_li_captions:
-                                to_check_objs.append((a, g.line_items[a]))
-                            else:
-                                break
-
-                    for kk, (li_idx, to_check_li) in enumerate(to_check_objs):
-                        if li.el.y_distance_to(
-                                to_check_li.el) < self.config.tolerance_top_bot_line_items and li.el.has_bold == to_check_li.el.has_bold:
-                            # combined line item size has to (almost) exceed width of line item area
-                            if to_check_li.el.width() + li.el.width() > line_item_area.width() * 0.9 and to_check_li.el.width() > line_item_area.width() * 0.5 and letter_len(
-                                    to_check_li.caption) / len(to_check_li.caption) > 0.5:
-                                # combine items
-                                li.add_el(to_check_li.el)
-                                used_li_captions.append(to_check_li.el.row_index)
-                                li_indices_to_delete.append(li_idx)
-                            else:
-                                break
-                        else:
-                            break
-
-                if not separator_below:
-                    # BELOW current li
-                    to_check_objs = []
-                    if k < len(g.line_items) - 1:
-                        for a in range(k + 1, len(g.line_items)):
-                            if not g.line_items[a].has_line_item_values() and g.line_items[
-                                a].el.row_index not in used_li_captions:
-                                to_check_objs.append((a, g.line_items[a]))
-                            else:
-                                break
-
-                    for kk, (li_idx, to_check_li) in enumerate(to_check_objs):
-                        if li.el.y_distance_to(
-                                to_check_li.el) < self.config.tolerance_top_bot_line_items and li.el.has_bold == to_check_li.el.has_bold:
-                            # combined line item size has to (almost) exceed width of line item area
-                            if to_check_li.el.width() + li.el.width() > line_item_area.width() * 0.9 and li.el.width() > line_item_area.width() * 0.5 and letter_len(
-                                    li.caption) / len(li.caption) > 0.5:
-                                # combine items
-                                li.add_el(to_check_li.el)
-                                used_li_captions.append(to_check_li.el.row_index)
-                                li_indices_to_delete.append(li_idx)
-                            else:
-                                break
-                        else:
-                            break
-
-        # delete all line items that were used
-        g.line_items = [li for k, li in enumerate(g.line_items) if k not in li_indices_to_delete]
-
-    def extract_tables(self, min_rows_numeric: int = 1, min_cols_numeric: int = 1) -> List[ExtractedTable]:
+    def extract_tables(self, min_rows: int = 1, min_cols: int = 1) -> List[ExtractedTable]:
 
         self._find_rows()
         self._find_columns_numeric()
@@ -1018,7 +879,7 @@ class ParseePdfPage:
 
         for g_index, g in enumerate(self.groups):
 
-            if len(g.elements) < min_cols_numeric:
+            if len(g.elements) < min_cols:
                 continue
 
             # sort elements
@@ -1060,109 +921,42 @@ class ParseePdfPage:
                                 value_grid[bounding_el.row_index][k] = copy.deepcopy(value_grid[bounding_el.row_index][k])
                                 value_grid[bounding_el.row_index][k].merge(bounding_el)
 
-            # assign values to line items
-            final_table = {"g_index": g_index, "values": []}
-            default_x0 = None
-            default_x1 = None
-            for li in g.line_items:
-                if default_x0 is None or li.el.x0 < default_x0:
-                    default_x0 = li.el.x0
-                if default_x1 is None or li.el.x1 > default_x1:
-                    default_x1 = li.el.x1
-            if default_x0 is None or default_x1 is None:
-                default_x0 = 0
-                default_x1 = 0
-            for row_index, val_list in value_grid.items():
-                # find li
-                chosen_li = None
-                for li in g.line_items:
-                    if li.el.row_index == row_index:
-                        chosen_li = li
-                        break
-                # create empty line item if not found
-                if chosen_li is None:
-                    default_el = next((item for item in val_list if item is not None), None)
-                    if default_el is None:
-                        default_el = self.rows[row_index]["base_elements"][0]
-                    chosen_li = LineItem(BaseElement(x0=default_x0, x1=default_x1, y0=default_el.y0, y1=default_el.y1, row_index=row_index))
-                chosen_li.assign_values(val_list)
-                final_table['values'].append(chosen_li)
+            # create table elements
+            final_table = ExtractedTable(g.line_items, g_index)
+
+            # fill empty line items
+            final_table.fill_empty_li(value_grid)
 
             # separate table if li's too far away from each other
             separate_final_tables = self._split_table_if_needed(final_table)
 
             # filter out empty columns
-            separate_final_tables = filter_out_empty_columns(separate_final_tables, min_cols_numeric)
+            separate_final_tables = filter_out_empty_columns(separate_final_tables, min_cols)
 
-            # consolidate line item captions if possible
-            self._consolidate_li_captions(g)
-
-            for t in separate_final_tables:
-                tables.append(t)
-
-        # make table areas
-        for t_index, table in enumerate(tables):
-            li_area = Area(0, 0, 0, 0)
-            li_area.init_with_elements([li.el for li in table['values']])
-            table['li_area'] = li_area
-            areas_temp = [[] for _ in table['values'][0].values]
-            table['value_areas'] = []
-            for li in table['values']:
-                for col_index, val in enumerate(li.values):
-                    areas_temp[col_index].append(val.el)
-            for col in areas_temp:
-                val_area = Area(0, 0, 0, 0)
-                val_area.init_with_elements(col)
-                table['value_areas'].append(val_area)
-
-            # adjust value areas to extend full space they have, all but first col
-            table['value_areas'] = sorted(table['value_areas'], key=lambda x: x.x0)
-            for a in range(len(table['value_areas']) - 1, 0, -1):
-                table['value_areas'][a].x0 = min(table['value_areas'][a].x0,
-                                                 table['value_areas'][a - 1].x1 + self.config.SPACE_MAX_DISTANCE)
-                table['value_areas'][a].y1 = max(table['value_areas'][a].y1, table['li_area'].y1)
-                table['value_areas'][a].y0 = min(table['value_areas'][a].y0, table['li_area'].y0)
-            # first column
-            if len(table['value_areas']) > 1:
-                table['value_areas'][0].x0 = min(table['value_areas'][0].x0,
-                                                 table['value_areas'][0].x1 - table['value_areas'][1].width())
-                table['value_areas'][0].y1 = max(table['value_areas'][0].y1, table['li_area'].y1)
-                table['value_areas'][0].y0 = min(table['value_areas'][0].y0, table['li_area'].y0)
-            # line items: close gap to first li
-            if len(table['value_areas']) > 0:
-                table['li_area'].x1 = max(table['li_area'].x1, table['value_areas'][0].x0 - self.config.SPACE_MAX_DISTANCE)
-
-            # check in new value cells if some unaligned numeric values can be found, where cell is currently empty
-            for li in table['values']:
-                for col_index, val in enumerate(li.values):
-                    if val.is_empty():
-                        search_row_index = li.el.row_index
-                        for el in self.rows[search_row_index]['base_elements']:
-                            if table['value_areas'][col_index].is_inside(el) and is_number_cell(el.text):
-                                li.values[col_index] = ValueItem(el)
-                                break
-
-        # convert to table objects
-        extracted_tables = [ExtractedTable(table) for table in tables]
+            tables += separate_final_tables
 
         # sort
-        extracted_tables = sorted(extracted_tables, key=lambda x: -x.table_area.y1)
+        tables = sorted(tables, key=lambda x: -x.table_area.y1)
 
         # discard tables with not enough rows
         to_del = []
-        for k, table in enumerate(extracted_tables):
-            if len(table.items) < min_rows_numeric:
+        for k, table in enumerate(tables):
+            if len(table.items) < min_rows:
                 to_del.append(k)
 
-        for k in range(len(extracted_tables) - 1, -1, -1):
+        for k in range(len(tables) - 1, -1, -1):
             if k in to_del:
-                del (extracted_tables[k])
+                del (tables[k])
 
-        return extracted_tables
+        return tables
 
-    def extract_text_and_tables(self, min_rows_numeric: int = 1, min_cols_numeric: int = 1, **kwargs) -> List[ExtractedPdfElement]:
+    def extract_text_and_tables(self, min_rows: int = 1, min_cols: int = 1, **kwargs) -> List[ExtractedPdfElement]:
+
+        if min_cols < 1 or min_rows < 1:
+            raise Exception("a table needs at least one column and one row")
+
         # launch table recognition
-        tables = self.extract_tables(min_rows_numeric, min_cols_numeric)
+        tables = self.extract_tables(min_rows, min_cols)
 
         all_elements = []
         all_extracted_elements: List[ExtractedPdfElement] = []
@@ -1177,7 +971,7 @@ class ParseePdfPage:
                         # add table now also to all elements
                         if t not in all_elements:
                             table_inserted = False
-                            # CHECK FIRST IF TABLE WAS SPLIT, IF SO, SORT AFTER THE FIRST SPLITTED TABLE
+                            # CHECK FIRST IF TABLE WAS SPLIT, IF SO, SORT AFTER THE FIRST SPLIT TABLE
                             all_tables = [(k, x.g_index) for k, x in enumerate(all_elements) if
                                           isinstance(x, ExtractedTable)]
                             if t.g_index in [x[1] for x in all_tables]:
@@ -1196,12 +990,12 @@ class ParseePdfPage:
                                 all_elements.append(t)
                                 all_extracted_elements.append(t)
                         # check if element is inside line item area
-                        if t.li_area.is_inside(base_el):
+                        if t.line_item_area.is_inside(base_el) or t.line_item_area.overlap_percent(base_el) > 0.8:
                             # check if element was used
-                            if base_el.row_index not in t.non_empty_li_row_indices:
-                                in_table = False
+                            if not t.line_item_area.contains(base_el):
+                                t.add_to_items(base_el)
                         # check if element is inside value area
-                        if t.total_value_area.is_inside(base_el):
+                        elif t.total_value_area.is_inside(base_el):
                             # check if element was placed
                             if base_el not in t.total_value_area.elements:
                                 # try to place element
@@ -1213,6 +1007,8 @@ class ParseePdfPage:
                                                 area.put_element(base_el)
                                                 t.add_value(base_el, col_idx)
                                                 break
+                        else:
+                            in_table = False
                         break
                 # add text element
                 if not in_table:
