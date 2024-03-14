@@ -696,10 +696,12 @@ class LineItem:
     caption: str
     values: List[ValueItem]
     base_elements: Set[BaseElement]
+    base_element_groups: Set[BaseElementGroup]
     el: BaseElementGroup
 
     def __init__(self, el: Union[BaseElement, BaseElementGroup], num_cols: Optional[int] = None):
         self.base_elements = set()
+        self.base_element_groups = set()
         self.el = BaseElementGroup([])
         self.add_el(el)
         self.values = [ValueItem(None) for _ in range(0, num_cols)] if num_cols is not None else []
@@ -719,6 +721,7 @@ class LineItem:
             self.el.add_element(el)
             self.base_elements.add(el)
         else:
+            self.base_element_groups.add(el)
             for contained in el.elements:
                 self.el.add_element(contained)
                 self.base_elements.add(contained)
@@ -984,7 +987,7 @@ class ExtractedTable(ExtractedPdfElement):
         li_area_elements: List[BaseElement] = []
         value_area_elements: List[List[BaseElement]] = [[] for _ in self.items[0].values]
         for li in self.items:
-            li_area_elements.append(li.el)
+            li_area_elements += list(li.base_element_groups) + [li.el]
             for k, val in enumerate(li.values):
                 value_area_elements[k].append(val.el)
         total_value_area_elements = reduce(lambda acc, x: acc + x, value_area_elements, [])
