@@ -13,12 +13,6 @@ IMG_BATCH_SIZE = 10
 to_filter_numbers = re.compile(r'(\([^0-9 ]*\))|[^0-9A-Za-z/]')
 
 
-def space_separator_thousands(cell_str):
-    if re.search(r'\b[0-9]{1,3} [0-9]{3}\b', cell_str):
-        return True
-    return False
-
-
 def letter_len(string):
     string = re.sub('[^A-Za-z]', '', string)
     return len(string)
@@ -28,12 +22,6 @@ def words_contained(cell_str, lower=False):
     if lower:
         cell_str = cell_str.lower()
     return list(filter(lambda x: x != "", re.sub('[^A-Za-z0-9%$€£¥]', ' ', cell_str).split(" ")))
-
-
-def comma_dot_separator_thousands(cell_str):
-    if re.search(r'\b[0-9]{1,3}[,.][0-9]{3}\b', cell_str):
-        return True
-    return False
 
 
 def is_number_cell(cell_str):

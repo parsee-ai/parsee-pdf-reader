@@ -9,7 +9,6 @@ from pdf_reader.helper import clean_numeric_value
 
 
 class PdfReaderConfig:
-
     SPACE_MAX_DISTANCE = 6
     TOLERANCE_GEN = 10
     LINE_BREAK_MAX_DISTANCE = 14
@@ -239,7 +238,7 @@ class Rectangle:
 class AreaPrediction(Rectangle):
 
     def __init__(self, relative_area: RelativeAreaPrediction, page_width: int, page_height: int, class_id: int):
-        super().__init__(int(relative_area.x0*page_width), int(relative_area.x1*page_width), int((1-relative_area.y1)*page_height), int((1-relative_area.y0)*page_height))
+        super().__init__(int(relative_area.x0 * page_width), int(relative_area.x1 * page_width), int((1 - relative_area.y1) * page_height), int((1 - relative_area.y0) * page_height))
         self.class_value = relative_area.class_name
         self.class_id = class_id
         self.prob = relative_area.prob
@@ -373,7 +372,6 @@ def natural_text_elements(elements: List[BaseElement]) -> str:
 
 
 class BaseElementGroup(BaseElement):
-
     elements: List[BaseElement]
 
     def __init__(self, elements: List[BaseElement]):
@@ -393,7 +391,7 @@ class BaseElementGroup(BaseElement):
             if el.has_bold:
                 self.has_bold = True
                 break
-        self.row_index = min([x.row_index for x in self.elements])
+        self.row_index = min([x.row_index for x in self.elements]) if len(self.elements) > 0 else 0
 
     def add_element(self, element: BaseElement):
         self.elements.append(element)
@@ -401,7 +399,6 @@ class BaseElementGroup(BaseElement):
 
 
 class Area(Rectangle):
-
     elements: List[BaseElement]
 
     def __init__(self, x0=0, x1=0, y0=0, y1=0, tolerance_detection=3, elements: Optional[List[BaseElement]] = None):
@@ -607,7 +604,6 @@ class Area(Rectangle):
 
 
 class TableGroup(Rectangle):
-
     elements: List[Area]
 
     def __init__(self, elements: List[Area], field_add=""):
@@ -697,23 +693,16 @@ class ValueItem:
 
 
 class LineItem:
-
     caption: str
     values: List[ValueItem]
     base_elements: Set[BaseElement]
     el: BaseElementGroup
 
-    def __init__(self, el: Union[BaseElement, BaseElementGroup]):
+    def __init__(self, el: Union[BaseElement, BaseElementGroup], num_cols: Optional[int] = None):
         self.base_elements = set()
-        if not isinstance(el, BaseElementGroup):
-            self.el = BaseElementGroup([el])
-            self.base_elements.add(el)
-        else:
-            self.el = BaseElementGroup(copy.copy(el.elements))
-            for e in el.elements:
-                self.base_elements.add(e)
-        self.caption = self.el.text
-        self.values = []
+        self.el = BaseElementGroup([])
+        self.add_el(el)
+        self.values = [ValueItem(None) for _ in range(0, num_cols)] if num_cols is not None else []
 
     def __str__(self):
         return "LI " + str(self.caption) + "; values: " + str(self.values)
@@ -733,12 +722,15 @@ class LineItem:
             for contained in el.elements:
                 self.el.add_element(contained)
                 self.base_elements.add(contained)
+        self.caption = self.el.text
 
     def add_value(self, el: BaseElement, col_idx: int):
-        if col_idx <= len(self.values)-1 and self.values[col_idx].is_empty():
+        if col_idx <= len(self.values) - 1 and self.values[col_idx].is_empty():
             self.values[col_idx] = ValueItem(el)
 
     def assign_values(self, value_el_list):
+        if len(self.values) != 0:
+            raise Exception("should be called only with empty values")
         for k, v_el in enumerate(value_el_list):
             self.values.append(ValueItem(v_el))
 
@@ -779,7 +771,7 @@ class NaturalTextHelper:
             if len(items_sorted) == 1:
                 last_item_text = self.clean_text_for_matching(items_sorted[0].text)
             else:
-                last_item_text = self.clean_text_for_matching(items_sorted[1].text+items_sorted[0].text)
+                last_item_text = self.clean_text_for_matching(items_sorted[1].text + items_sorted[0].text)
             for line in self.lines_cleaned:
                 if line.endswith(last_item_text):
                     return True
@@ -811,7 +803,6 @@ class NaturalTextHelper:
 
 
 class ExtractedPdfElement(Rectangle):
-
     el: Optional[BaseElement]
     in_area: Optional[AreaPrediction]
 
@@ -890,7 +881,6 @@ class PdfParagraph(ExtractedPdfElement):
 
 
 class ExtractedTable(ExtractedPdfElement):
-
     table_area: Area
     total_value_area: Area
     value_areas: List[Area]
@@ -910,7 +900,9 @@ class ExtractedTable(ExtractedPdfElement):
     def fill_empty_li(self, value_grid: Dict[int, List[List[Union[BaseElement, None]]]]):
 
         final_li: List[LineItem] = []
+        num_cols = 0
         for row_index, val_list in value_grid.items():
+            num_cols = len(val_list) if len(val_list) > 0 else num_cols
             # find li
             chosen_li = None
             for li in self.items:
@@ -929,8 +921,14 @@ class ExtractedTable(ExtractedPdfElement):
             chosen_li.assign_values(val_list)
             final_li.append(chosen_li)
 
-        if len(final_li) != len(self.items):
-            self.set_line_items(final_li)
+        self.set_line_items(final_li)
+
+        # check that all items have the necessary columns
+        for li in self.items:
+            if len(li.values) == 0:
+                li.assign_values([None for _ in range(0, num_cols)])
+            elif len(li.values) != num_cols:
+                raise Exception("number of columns not consistent")
 
     def set_line_items(self, line_items: List[LineItem]):
 
@@ -1000,21 +998,21 @@ class ExtractedTable(ExtractedPdfElement):
             self.value_areas.append(area)
 
         # adjust value areas to extend full space they have, all but first col
-        self.value_areas = sorted(self.value_areas, key=lambda x: x.x0)
-        for a in range(len(self.value_areas) - 1, 0, -1):
-            self.value_areas[a].x0 = min(self.value_areas[a].x0,
-                                             self.value_areas[a - 1].x1 + self._DEFAULT_SPACE_COLS)
-            self.value_areas[a].y1 = max(self.value_areas[a].y1, self.line_item_area.y1)
-            self.value_areas[a].y0 = min(self.value_areas[a].y0, self.line_item_area.y0)
+        value_areas = sorted([x for x in self.value_areas if len(x.elements) > 0], key=lambda x: x.x0)
+        for a in range(len(value_areas) - 1, 0, -1):
+            value_areas[a].x0 = min(value_areas[a].x0,
+                                         value_areas[a - 1].x1 + self._DEFAULT_SPACE_COLS)
+            value_areas[a].y1 = max(value_areas[a].y1, self.line_item_area.y1)
+            value_areas[a].y0 = min(value_areas[a].y0, self.line_item_area.y0)
         # first column
-        if len(self.value_areas) > 1:
-            self.value_areas[0].x0 = min(self.value_areas[0].x0,
-                                             self.value_areas[0].x1 - self.value_areas[1].width())
-            self.value_areas[0].y1 = max(self.value_areas[0].y1, self.line_item_area.y1)
-            self.value_areas[0].y0 = min(self.value_areas[0].y0, self.line_item_area.y0)
+        if len(value_areas) > 1:
+            value_areas[0].x0 = min(value_areas[0].x0,
+                                         value_areas[0].x1 - value_areas[1].width())
+            value_areas[0].y1 = max(value_areas[0].y1, self.line_item_area.y1)
+            value_areas[0].y0 = min(value_areas[0].y0, self.line_item_area.y0)
         # line items: close gap to first li
-        if len(self.value_areas) > 0:
-            self.line_item_area.x1 = max(self.line_item_area.x1, self.value_areas[0].x0 - self._DEFAULT_SPACE_COLS)
+        if len(value_areas) > 0:
+            self.line_item_area.x1 = max(self.line_item_area.x1, value_areas[0].x0 - self._DEFAULT_SPACE_COLS)
 
     def set_table_size(self):
 
@@ -1031,6 +1029,18 @@ class ExtractedTable(ExtractedPdfElement):
         for li in self.items:
             del (li.values[column_index])
         self.set_line_items(self.items)
+
+    def add_to_items(self, base_el: BaseElementGroup):
+        if base_el.row_index not in self.line_item_area.all_row_indices:
+            # add empty line item
+            new_item = LineItem(base_el, len(self.items[0].values))
+            line_items = copy.copy(self.items)
+            line_items.append(new_item)
+            self.set_line_items(line_items)
+        else:
+            # merge with best line item caption
+            self._items_by_row_idx[base_el.row_index].add_el(base_el)
+        self.set_areas()
 
 
 @dataclass

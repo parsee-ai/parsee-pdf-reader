@@ -6,10 +6,10 @@ import numpy as np
 from pdfminer.layout import LTTextBox, LTTextLine, LTChar, Rect
 
 from pdf_reader.custom_dataclasses import Rectangle, BaseElement, Area, BaseElementGroup, LineItem, ValueItem, ExtractedTable, ExtractedPdfElement, PdfReaderConfig, TableGroup, NaturalTextHelper
-from pdf_reader.helper import is_number_cell, space_separator_thousands, comma_dot_separator_thousands, letter_len, words_contained
+from pdf_reader.helper import is_number_cell, letter_len, words_contained
 
 
-def filter_out_empty_columns(output_list: List[ExtractedTable], min_cols_numeric: int) -> List[ExtractedTable]:
+def filter_out_empty_columns(output_list: List[ExtractedTable], min_cols: int) -> List[ExtractedTable]:
     # filter out columns which have only None values
     for table_index in range(len(output_list) - 1, -1, -1):
         table = output_list[table_index]
@@ -19,7 +19,7 @@ def filter_out_empty_columns(output_list: List[ExtractedTable], min_cols_numeric
                         li.values[col_index].is_empty()]) == len(table.items):
                     # splice column
                     table.remove_column(col_index)
-        if len(table.items) == 0 or len(table.items[0].values) < min_cols_numeric:
+        if len(table.items) == 0 or len(table.items[0].values) < min_cols:
             del (output_list[table_index])
 
     return output_list
@@ -109,27 +109,6 @@ class ParseePdfPage:
         self.elements_list = []
         self.non_text_elements = []
 
-        # first: check if page contains some space separated values and no other thousands separator
-        sp = 0
-        replace_space_separator = True
-        for element in text_boxes:
-            if isinstance(element, LTTextBox):
-                for o in element._objs:
-                    if isinstance(o, LTTextLine):
-                        try:
-                            text = o.get_text()
-                        except Exception as e:
-                            text = ""
-                        text_stripped = text.strip()
-                        if is_number_cell(text_stripped):
-                            if space_separator_thousands(text_stripped):
-                                sp += 1
-                            elif comma_dot_separator_thousands(text_stripped):
-                                replace_space_separator = False
-                                break
-        if sp == 0:
-            replace_space_separator = False
-
         # now collect elements
         new_text = ""
         new_x0 = None
@@ -186,12 +165,7 @@ class ParseePdfPage:
                                             has_bold = True
 
                                 # start new element
-                                if (t == " " or t == "\t" or t == ")" or break_now) and (
-                                        not replace_space_separator or not (
-                                        replace_space_separator and is_number_cell(
-                                    text_stripped) and space_separator_thousands(
-                                    text_stripped) and t == " " and kk > 0 and o._objs[
-                                            kk - 1].get_text() != " ")):
+                                if t == " " or t == "\t" or t == ")" or break_now:
                                     if t == ")":
                                         new_text += ")"
                                         new_x1 = c.x1
@@ -893,118 +867,6 @@ class ParseePdfPage:
 
         return output_list
 
-    def _has_value_separator(self, li):
-
-        bot = False
-        top = False
-
-        if "........" in li.el.text or "________" in li.el.text:
-            bot = True
-
-        # check for separator above/below values
-        if len(li.values) > 0:
-            value_el = li.first_non_empty_value()
-            if value_el is not None:
-                el = value_el.el
-                for non_text_el in self.non_text_elements:
-                    # take only real lines
-                    if non_text_el.height() <= self.config.line_max_height and el.h_overlap(non_text_el):
-                        if el.y0 > non_text_el.y0 and (abs(el.y0 - non_text_el.y0) <= self.config.SPACE_MAX_DISTANCE or abs(
-                                el.y0 - non_text_el.y1) <= self.config.SPACE_MAX_DISTANCE):
-                            bot = True
-                        if el.y0 < non_text_el.y0 and (abs(el.y1 - non_text_el.y0) <= self.config.SPACE_MAX_DISTANCE or abs(
-                                el.y1 - non_text_el.y1) <= self.config.SPACE_MAX_DISTANCE):
-                            top = True
-                        if bot and top:
-                            return top, bot
-
-        # check also for line item itself
-        for non_text_el in self.non_text_elements:
-            # take only real lines
-            if non_text_el.height() <= self.config.line_max_height and li.el.h_overlap(non_text_el):
-                if li.el.y0 > non_text_el.y0 and (abs(li.el.y0 - non_text_el.y0) <= self.config.SPACE_MAX_DISTANCE or abs(
-                        li.el.y0 - non_text_el.y1) <= self.config.SPACE_MAX_DISTANCE):
-                    bot = True
-                if li.el.y0 < non_text_el.y0 and (abs(li.el.y1 - non_text_el.y0) <= self.config.SPACE_MAX_DISTANCE or abs(
-                        li.el.y1 - non_text_el.y1) <= self.config.SPACE_MAX_DISTANCE):
-                    top = True
-                if bot and top:
-                    break
-
-        return top, bot
-
-    # TODO: adjust
-    def _consolidate_li_captions(self, g):
-
-        line_item_area = None
-        if len(g.line_items) > 0:
-            line_item_area = Area(0, 0, 0, 0)
-            line_item_area.init_with_elements([li.el for li in g.line_items])
-
-        # consolidate line item captions eventually
-        used_li_captions = []
-        li_indices_to_delete = []
-        for k, li in enumerate(g.line_items):
-            if li.has_line_item_values():
-
-                # check whether current li has separators above or below
-                separator_above, separator_below = self._has_value_separator(li)
-
-                if not separator_above:
-                    # ABOVE current li
-                    to_check_objs = []
-                    if k > 0:
-                        for a in range(k - 1, -1, -1):
-                            if not g.line_items[a].has_line_item_values() and g.line_items[
-                                a].el.row_index not in used_li_captions:
-                                to_check_objs.append((a, g.line_items[a]))
-                            else:
-                                break
-
-                    for kk, (li_idx, to_check_li) in enumerate(to_check_objs):
-                        if li.el.y_distance_to(
-                                to_check_li.el) < self.config.tolerance_top_bot_line_items and li.el.has_bold == to_check_li.el.has_bold:
-                            # combined line item size has to (almost) exceed width of line item area
-                            if to_check_li.el.width() + li.el.width() > line_item_area.width() * 0.9 and to_check_li.el.width() > line_item_area.width() * 0.5 and letter_len(
-                                    to_check_li.caption) / len(to_check_li.caption) > 0.5:
-                                # combine items
-                                li.add_el(to_check_li.el)
-                                used_li_captions.append(to_check_li.el.row_index)
-                                li_indices_to_delete.append(li_idx)
-                            else:
-                                break
-                        else:
-                            break
-
-                if not separator_below:
-                    # BELOW current li
-                    to_check_objs = []
-                    if k < len(g.line_items) - 1:
-                        for a in range(k + 1, len(g.line_items)):
-                            if not g.line_items[a].has_line_item_values() and g.line_items[
-                                a].el.row_index not in used_li_captions:
-                                to_check_objs.append((a, g.line_items[a]))
-                            else:
-                                break
-
-                    for kk, (li_idx, to_check_li) in enumerate(to_check_objs):
-                        if li.el.y_distance_to(
-                                to_check_li.el) < self.config.tolerance_top_bot_line_items and li.el.has_bold == to_check_li.el.has_bold:
-                            # combined line item size has to (almost) exceed width of line item area
-                            if to_check_li.el.width() + li.el.width() > line_item_area.width() * 0.9 and li.el.width() > line_item_area.width() * 0.5 and letter_len(
-                                    li.caption) / len(li.caption) > 0.5:
-                                # combine items
-                                li.add_el(to_check_li.el)
-                                used_li_captions.append(to_check_li.el.row_index)
-                                li_indices_to_delete.append(li_idx)
-                            else:
-                                break
-                        else:
-                            break
-
-        # delete all line items that were used
-        g.line_items = [li for k, li in enumerate(g.line_items) if k not in li_indices_to_delete]
-
     def extract_tables(self, min_rows: int = 1, min_cols: int = 1) -> List[ExtractedTable]:
 
         self._find_rows()
@@ -1089,6 +951,10 @@ class ParseePdfPage:
         return tables
 
     def extract_text_and_tables(self, min_rows: int = 1, min_cols: int = 1, **kwargs) -> List[ExtractedPdfElement]:
+
+        if min_cols < 1 or min_rows < 1:
+            raise Exception("a table needs at least one column and one row")
+
         # launch table recognition
         tables = self.extract_tables(min_rows, min_cols)
 
@@ -1124,13 +990,12 @@ class ParseePdfPage:
                                 all_elements.append(t)
                                 all_extracted_elements.append(t)
                         # check if element is inside line item area
-                        if t.line_item_area.is_inside(base_el):
+                        if t.line_item_area.is_inside(base_el) or t.line_item_area.overlap_percent(base_el) > 0.8:
                             # check if element was used
                             if not t.line_item_area.contains(base_el):
-                                # TODO: merge line item captions
-                                pass
+                                t.add_to_items(base_el)
                         # check if element is inside value area
-                        if t.total_value_area.is_inside(base_el):
+                        elif t.total_value_area.is_inside(base_el):
                             # check if element was placed
                             if base_el not in t.total_value_area.elements:
                                 # try to place element
@@ -1142,6 +1007,8 @@ class ParseePdfPage:
                                                 area.put_element(base_el)
                                                 t.add_value(base_el, col_idx)
                                                 break
+                        else:
+                            in_table = False
                         break
                 # add text element
                 if not in_table:

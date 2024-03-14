@@ -127,24 +127,25 @@ def parse_layout(layout_obj: any, force_chars: bool = False) -> List[Union[LTTex
 
 
 # page needs OCR if either no elements found or unreadable characters are present
-def needs_ocr(text_boxes: List[LTTextBox]) -> bool:
+def needs_ocr(text_boxes: List[Union[LTTextBox, LTChar]]) -> bool:
 
     if len(text_boxes) == 0:
         return True
 
     for element in text_boxes:
-        for o in element._objs:
-            if isinstance(o, LTTextLine):
-                try:
-                    text = o.get_text()
-                except Exception as e:
-                    text = ""
-                text_stripped = text.strip()
-                if text_stripped:
-                    for kk, c in enumerate(o._objs):
-                        t = c.get_text()
-                        if t is not None and t.startswith("(cid:"):
-                            return True
+        if isinstance(element, LTTextBox):
+            for o in element._objs:
+                if isinstance(o, LTTextLine):
+                    try:
+                        text = o.get_text()
+                    except Exception as e:
+                        text = ""
+                    text_stripped = text.strip()
+                    if text_stripped:
+                        for kk, c in enumerate(o._objs):
+                            t = c.get_text()
+                            if t is not None and t.startswith("(cid:"):
+                                return True
     return False
 
 
