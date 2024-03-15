@@ -768,18 +768,6 @@ class NaturalTextHelper:
     def clean_text_for_matching(self, string_val: str) -> str:
         return re.sub(r'[^A-Za-z.,\d]', '', string_val).lower()
 
-    def has_line_items(self, group: TableGroup) -> bool:
-        for row_idx, items in group.elements_by_row().items():
-            items_sorted = sorted(items, key=lambda x: -x.x1)
-            if len(items_sorted) == 1:
-                last_item_text = self.clean_text_for_matching(items_sorted[0].text)
-            else:
-                last_item_text = self.clean_text_for_matching(items_sorted[1].text + items_sorted[0].text)
-            for line in self.lines_cleaned:
-                if line.endswith(last_item_text):
-                    return True
-        return False
-
     def is_adjacent_percent(self, table: TableGroup, compare_area: Area) -> float:
         all_rows = table.elements_by_row()
         # go row by row

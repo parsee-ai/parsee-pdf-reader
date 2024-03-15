@@ -710,13 +710,7 @@ class ParseePdfPage:
             if x0 is not None:
                 g.data_area = Area(x0, x1, y0, y1)
 
-        # check that all groups have some line items
-        valid_groups = []
-        for k, g in enumerate(groups):
-            if self.natural_text.has_line_items(g):
-               valid_groups.append(k)
-
-        self.groups = [x for k, x in enumerate(groups) if k in valid_groups]
+        self.groups = groups
 
     def _find_columns_text(self, el_list, tolerance=0):
 
