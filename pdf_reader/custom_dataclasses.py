@@ -464,6 +464,7 @@ class Area(Rectangle):
 
     def init_with_elements(self, el_list):
 
+        self.all_row_indices = set()
         self.elements = [x for x in el_list if x is not None]
 
         self.x0 = None
