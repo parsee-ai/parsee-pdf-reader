@@ -776,9 +776,18 @@ class ParseePdfPage:
                         continue
                     overlapping_elements_area = Area()
                     overlapping_elements_area.init_with_elements(overlapping_elements)
-                    candidates_by_group[g_index].append(
-                        {"scoring": {"final_score": 0}, "overlapping_elements_area": overlapping_elements_area,
-                         "value_rows": value_rows})
+                    # combine areas and check that there are no collisions with other tables
+                    collides = False
+                    theoretical_table = Area()
+                    theoretical_table.init_with_elements(overlapping_elements+g.elements[0].elements)
+                    for g_index2, check_group in enumerate(self.groups):
+                        if g_index2 != g_index and check_group.collides_with(theoretical_table):
+                            collides = True
+                            break
+                    if not collides:
+                        candidates_by_group[g_index].append(
+                            {"scoring": {"final_score": 0}, "overlapping_elements_area": overlapping_elements_area,
+                             "value_rows": value_rows})
 
         # criteria for scoring, min letter len of line item of 6
         scoring_weights = {"words": 5, "distance": 1, "completeness": 5, "natural_text_fits": 8}
