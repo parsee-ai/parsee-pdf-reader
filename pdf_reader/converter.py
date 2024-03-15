@@ -88,8 +88,8 @@ def get_pdf_pages(pdf_path: str, config: Optional[PdfReaderConfig] = None, force
     config = PdfReaderConfig(None, None, None) if config is None else config
     # check if file is an image
     if is_image(pdf_path):
-        mediabox, text_boxes, pypdf_reader = get_elements_from_image(pdf_path)
-        return [ParseePdfPage(0, pdf_path, mediabox, text_boxes, config, get_natural_text(pypdf_reader, 0))]
+        mediabox, text_boxes, pypdf_text = get_elements_from_image(pdf_path)
+        return [ParseePdfPage(0, pdf_path, mediabox, text_boxes, config, pypdf_text)]
     document, interpreter, device, fp, pypdf_reader = open_pdf(pdf_path)
     pages = []
     for page_index, page in enumerate(PDFPage.create_pages(document)):
@@ -98,8 +98,8 @@ def get_pdf_pages(pdf_path: str, config: Optional[PdfReaderConfig] = None, force
         text_boxes = parse_layout(layout)
         run_ocr = force_ocr or needs_ocr(text_boxes)
         if run_ocr:
-            mediabox, text_boxes, pypdf_reader = repair_layout(pdf_path, page_index)
-            page_obj = ParseePdfPage(page_index, pdf_path, mediabox, text_boxes, config, get_natural_text(pypdf_reader, page_index))
+            mediabox, text_boxes, pypdf_text = repair_layout(pdf_path, page_index)
+            page_obj = ParseePdfPage(page_index, pdf_path, mediabox, text_boxes, config, pypdf_text)
         else:
             page_obj = ParseePdfPage(page_index, pdf_path, page.mediabox, text_boxes, config, get_natural_text(pypdf_reader, page_index))
         pages.append(page_obj)
@@ -149,7 +149,7 @@ def needs_ocr(text_boxes: List[Union[LTTextBox, LTChar]]) -> bool:
     return False
 
 
-def get_elements_from_image(image_path: str, custom_temp_folder_path: Optional[str] = None) -> Tuple[any, List[LTTextBox], pypdf.PdfReader]:
+def get_elements_from_image(image_path: str, custom_temp_folder_path: Optional[str] = None) -> Tuple[any, List[LTTextBox], NaturalTextHelper]:
 
     if custom_temp_folder_path is None:
         temp_folder = tempfile.TemporaryDirectory()
@@ -165,6 +165,7 @@ def get_elements_from_image(image_path: str, custom_temp_folder_path: Optional[s
     f.close()
 
     document, interpreter, device, fp, pypdf_reader = open_pdf(pdf_path_tmp)
+    pypdf_text = get_natural_text(pypdf_reader, 0)
     pages = [x for x in PDFPage.create_pages(document)]
     if len(pages) != 1:
         raise Exception("repaired PDF page does not have exactly one page")
@@ -178,16 +179,16 @@ def get_elements_from_image(image_path: str, custom_temp_folder_path: Optional[s
     # use char level parsing for image output
     boxes = parse_layout(layout, True)
     fp.close()
-    return page.mediabox, boxes, pypdf_reader
+    return page.mediabox, boxes, pypdf_text
 
 
-def repair_layout(path: str, page_index: int) -> Tuple[any, List[LTTextBox], pypdf.PdfReader]:
+def repair_layout(path: str, page_index: int) -> Tuple[any, List[LTTextBox], NaturalTextHelper]:
 
     temp_folder = tempfile.TemporaryDirectory()
     temp_folder_path = temp_folder.name
 
     # save temporary image of PDF
-    target_height = 3200
+    target_height = 2000
     img_path_tmp = make_images_from_pdf(path, temp_folder_path, [target_height], page_index)[target_height][0]
 
     output = get_elements_from_image(img_path_tmp, temp_folder_path)
