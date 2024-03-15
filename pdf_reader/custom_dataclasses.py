@@ -480,6 +480,7 @@ class Area(Rectangle):
                 self.x1 = el.x1
             if self.y1 is None or el.y1 > self.y1:
                 self.y1 = el.y1
+            self.all_row_indices.add(el.row_index)
 
     def fit_elements(self, el_fit=None):
 
