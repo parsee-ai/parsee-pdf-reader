@@ -160,7 +160,7 @@ def get_elements_from_image(image_path: str, custom_temp_folder_path: Optional[s
     # start tesseract
     pdf_path_tmp = os.path.join(temp_folder_path, "ocr.pdf")
     f = open(pdf_path_tmp, "w+b")
-    pdf = pytesseract.image_to_pdf_or_hocr(image_path, extension='pdf')
+    pdf = pytesseract.image_to_pdf_or_hocr(image_path, extension='pdf', config="--psm 11")
     f.write(bytearray(pdf))
     f.close()
 
