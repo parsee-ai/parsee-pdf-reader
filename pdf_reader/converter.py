@@ -9,19 +9,22 @@ from pdfminer.pdfparser import PDFParser
 from pdfminer.pdfdocument import PDFDocument, PDFEncryptionError
 from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
 from pdfminer.converter import PDFPageAggregator
-from pdfminer.layout import LAParams, LTTextBox, LTTextLine, LTChar, LTFigure, LTPage, Rect
+from pdfminer.layout import LAParams, LTTextBox, LTTextLine, LTChar, LTFigure, LTPage, Rect, PDFFont, PDFColorSpace, PDFGraphicState
 from pdfminer.pdfpage import PDFPage
 import pytesseract
+from pytesseract import Output
+import cv2
 
 from pdf_reader.custom_dataclasses import PdfReaderConfig, NaturalTextHelper
 from pdf_reader.pdf_page import ParseePdfPage
 from pdf_reader.helper import make_images_from_pdf
 
-
 """
 Currently the image detection is not very sophisticated and goes purely by file extensions
 This is in order not to add some additional packages like python-magic just for this simple check
 """
+
+
 def is_image(file_path: str):
     image_types_supported = ["png", "jpg", "jpeg"]
     file_name = os.path.basename(file_path).lower()
@@ -88,8 +91,8 @@ def get_pdf_pages(pdf_path: str, config: Optional[PdfReaderConfig] = None, force
     config = PdfReaderConfig(None, None, None) if config is None else config
     # check if file is an image
     if is_image(pdf_path):
-        mediabox, text_boxes, pypdf_text = get_elements_from_image(pdf_path)
-        return [ParseePdfPage(0, pdf_path, mediabox, text_boxes, config, pypdf_text)]
+        mediabox, text_boxes = get_elements_from_image(pdf_path)
+        return [ParseePdfPage(0, pdf_path, mediabox, text_boxes, config, NaturalTextHelper(None))]
     document, interpreter, device, fp, pypdf_reader = open_pdf(pdf_path)
     pages = []
     for page_index, page in enumerate(PDFPage.create_pages(document)):
@@ -128,7 +131,6 @@ def parse_layout(layout_obj: any, force_chars: bool = False) -> List[Union[LTTex
 
 # page needs OCR if either no elements found or unreadable characters are present
 def needs_ocr(text_boxes: List[Union[LTTextBox, LTChar]]) -> bool:
-
     if len(text_boxes) == 0:
         return True
 
@@ -149,41 +151,46 @@ def needs_ocr(text_boxes: List[Union[LTTextBox, LTChar]]) -> bool:
     return False
 
 
-def get_elements_from_image(image_path: str, custom_temp_folder_path: Optional[str] = None) -> Tuple[any, List[LTTextBox], NaturalTextHelper]:
+def get_elements_from_image(image_path: str) -> Tuple[Rect, List[LTChar]]:
+    CONF_THRESHOLD = 60
 
-    if custom_temp_folder_path is None:
-        temp_folder = tempfile.TemporaryDirectory()
-        temp_folder_path = temp_folder.name
-    else:
-        temp_folder_path = custom_temp_folder_path
+    output = []
 
     # start tesseract
-    pdf_path_tmp = os.path.join(temp_folder_path, "ocr.pdf")
-    f = open(pdf_path_tmp, "w+b")
-    pdf = pytesseract.image_to_pdf_or_hocr(image_path, extension='pdf', config="--psm 11")
-    f.write(bytearray(pdf))
-    f.close()
+    img = cv2.imread(image_path)
+    tesseract_data = pytesseract.image_to_data(img, output_type=Output.DICT, config="--psm 11")
+    for k, conf in enumerate(tesseract_data["conf"]):
+        if conf < 0:
+            continue
+        x0 = tesseract_data["left"][k]
+        x1 = tesseract_data["left"][k] + tesseract_data["width"][k]
+        y0 = tesseract_data["top"][k]
+        y1 = tesseract_data["top"][k] + tesseract_data["height"][k]
+        if CONF_THRESHOLD > conf >= 0:
+            # crop the text and resize, then run tesseract just on that text piece again
+            padding = 2
+            crop_img = img[y0 - padding:y1 + padding, x0 - padding:x1 + padding]
+            crop_img = cv2.resize(crop_img, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+            data_cropped_img = pytesseract.image_to_data(crop_img, output_type=Output.DICT, config="--psm 7")
+            new_text = " ".join([x for k, x in enumerate(data_cropped_img["text"]) if data_cropped_img["conf"][k] >= 0])
+            # replace in dictionary
+            tesseract_data["text"][k] = new_text
+        text = tesseract_data["text"][k]
 
-    document, interpreter, device, fp, pypdf_reader = open_pdf(pdf_path_tmp)
-    pypdf_text = get_natural_text(pypdf_reader, 0)
-    pages = [x for x in PDFPage.create_pages(document)]
-    if len(pages) != 1:
-        raise Exception("repaired PDF page does not have exactly one page")
+        img_height = img.shape[1]
+        el = LTChar((1, 0, 0, 1, x0, y0), PDFFont({}, {}), 1.0, 1.0, 1.0, text, 1.0, 1.0, PDFColorSpace("", 0), PDFGraphicState())
+        el.x0 = x0
+        el.x1 = x1
+        el.y0 = img_height - y1
+        el.y1 = img_height - y0
 
-    page = pages[0]
-    interpreter.process_page(page)
-    layout = device.get_result()
-    # delete temporary folder and contents
-    if custom_temp_folder_path is None:
-        shutil.rmtree(temp_folder_path)
-    # use char level parsing for image output
-    boxes = parse_layout(layout, True)
-    fp.close()
-    return page.mediabox, boxes, pypdf_text
+        output.append(el)
+
+    page_size = (0, 0, img.shape[1], img.shape[0])
+    return page_size, output
 
 
-def repair_layout(path: str, page_index: int) -> Tuple[any, List[LTTextBox], NaturalTextHelper]:
-
+def repair_layout(path: str, page_index: int) -> Tuple[any, List[LTChar], NaturalTextHelper]:
     temp_folder = tempfile.TemporaryDirectory()
     temp_folder_path = temp_folder.name
 
@@ -191,6 +198,6 @@ def repair_layout(path: str, page_index: int) -> Tuple[any, List[LTTextBox], Nat
     target_height = 2000
     img_path_tmp = make_images_from_pdf(path, temp_folder_path, [target_height], page_index)[target_height][0]
 
-    output = get_elements_from_image(img_path_tmp, temp_folder_path)
+    mediabox, elements = get_elements_from_image(img_path_tmp)
     shutil.rmtree(temp_folder_path)
-    return output
+    return mediabox, elements, NaturalTextHelper(None)
