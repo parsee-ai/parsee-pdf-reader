@@ -177,7 +177,7 @@ def get_elements_from_image(image_path: str) -> Tuple[Rect, List[LTChar]]:
             tesseract_data["text"][k] = new_text
         text = tesseract_data["text"][k]
 
-        img_height = img.shape[1]
+        img_height = img.shape[0]
         el = LTChar((1, 0, 0, 1, x0, y0), PDFFont({}, {}), 1.0, 1.0, 1.0, text, 1.0, 1.0, PDFColorSpace("", 0), PDFGraphicState())
         el.x0 = x0
         el.x1 = x1
