@@ -158,6 +158,7 @@ def get_elements_from_image(image_path: str) -> Tuple[Rect, List[LTChar]]:
 
     # start tesseract
     img = cv2.imread(image_path)
+    height, width, channels = img.shape
     tesseract_data = pytesseract.image_to_data(img, output_type=Output.DICT, config="--psm 11")
     for k, conf in enumerate(tesseract_data["conf"]):
         if conf < 0:
@@ -169,7 +170,7 @@ def get_elements_from_image(image_path: str) -> Tuple[Rect, List[LTChar]]:
         if CONF_THRESHOLD > conf >= 0:
             # crop the text and resize, then run tesseract just on that text piece again
             padding = 2
-            crop_img = img[y0 - padding:y1 + padding, x0 - padding:x1 + padding]
+            crop_img = img[max(y0 - padding, 0):min(y1 + padding, height), max(x0 - padding, 0):min(x1 + padding, width)]
             crop_img = cv2.resize(crop_img, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
             data_cropped_img = pytesseract.image_to_data(crop_img, output_type=Output.DICT, config="--psm 7")
             new_text = " ".join([x for k, x in enumerate(data_cropped_img["text"]) if data_cropped_img["conf"][k] >= 0])
