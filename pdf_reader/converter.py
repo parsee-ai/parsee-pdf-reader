@@ -158,7 +158,8 @@ def get_elements_from_image(image_path: str) -> Tuple[Rect, List[LTChar]]:
 
     # start tesseract
     img = cv2.imread(image_path)
-    height, width, channels = img.shape
+    height = img.shape[0]
+    width = img.shape[1]
     tesseract_data = pytesseract.image_to_data(img, output_type=Output.DICT, config="--psm 11")
     for k, conf in enumerate(tesseract_data["conf"]):
         if conf < 0:
