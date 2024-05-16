@@ -955,7 +955,7 @@ class ParseePdfPage:
 
         return tables
 
-    def extract_text_and_tables(self, min_rows: int = 1, min_cols: int = 1, **kwargs) -> List[ExtractedPdfElement]:
+    def extract_text_and_tables(self, min_rows: int = 2, min_cols: int = 1, **kwargs) -> List[ExtractedPdfElement]:
 
         if min_cols < 1 or min_rows < 1:
             raise Exception("a table needs at least one column and one row")
