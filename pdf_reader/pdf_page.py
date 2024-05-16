@@ -776,18 +776,9 @@ class ParseePdfPage:
                         continue
                     overlapping_elements_area = Area()
                     overlapping_elements_area.init_with_elements(overlapping_elements)
-                    # combine areas and check that there are no collisions with other tables
-                    collides = False
-                    theoretical_table = Area()
-                    theoretical_table.init_with_elements(overlapping_elements+g.elements[0].elements)
-                    for g_index2, check_group in enumerate(self.groups):
-                        if g_index2 != g_index and check_group.collides_with(theoretical_table):
-                            collides = True
-                            break
-                    if not collides:
-                        candidates_by_group[g_index].append(
-                            {"scoring": {"final_score": 0}, "overlapping_elements_area": overlapping_elements_area,
-                             "value_rows": value_rows})
+                    candidates_by_group[g_index].append(
+                        {"scoring": {"final_score": 0}, "overlapping_elements_area": overlapping_elements_area,
+                         "value_rows": value_rows})
 
         # criteria for scoring, min letter len of line item of 6
         scoring_weights = {"words": 5, "distance": 1, "completeness": 5, "natural_text_fits": 8}
@@ -941,11 +932,22 @@ class ParseePdfPage:
         # sort
         tables = sorted(tables, key=lambda x: -x.table_area.y1)
 
-        # discard tables with not enough rows
-        to_del = []
+        # discard tables that collide with another table (take table with more rows/columns)
+        to_del = set()
         for k, table in enumerate(tables):
+            # discard tables with not enough rows
             if len(table.items) < min_rows:
-                to_del.append(k)
+                to_del.add(k)
+            if k in to_del:
+                continue
+            for kk in range(k+1, len(tables)):
+                if kk in to_del:
+                    continue
+                if table.table_area.collides_with(tables[kk].table_area):
+                    table1_score = table.num_rows * table.num_cols
+                    table2_score = tables[kk].num_rows * tables[kk].num_cols
+                    to_discard = k if table1_score < table2_score else kk
+                    to_del.add(to_discard)
 
         for k in range(len(tables) - 1, -1, -1):
             if k in to_del:
@@ -953,7 +955,7 @@ class ParseePdfPage:
 
         return tables
 
-    def extract_text_and_tables(self, min_rows: int = 1, min_cols: int = 1, **kwargs) -> List[ExtractedPdfElement]:
+    def extract_text_and_tables(self, min_rows: int = 2, min_cols: int = 1, **kwargs) -> List[ExtractedPdfElement]:
 
         if min_cols < 1 or min_rows < 1:
             raise Exception("a table needs at least one column and one row")

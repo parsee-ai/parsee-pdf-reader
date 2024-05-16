@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "parsee-pdf-reader"
-version = "0.1.5.9"
+version = "0.1.6.0"
 description = ""
 authors = ["Parsee.ai <info@parsee.ai>"]
 readme = "README.md"
@@ -21,3 +21,6 @@ pypdf = "^3.16.2"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.group.test.dependencies]
+pytest = "*"
