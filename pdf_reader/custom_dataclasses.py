@@ -23,7 +23,7 @@ class PdfReaderConfig:
     line_break_distance = 20
     separate_columns_distance = 150
     separate_columns_distance_wide_layout = 250
-    separate_table_distance = 50
+    separate_table_distance = 200
     text_max_number_col = 15
     table_header_max_height = 120
     table_sides_tolerance_x0 = 50
