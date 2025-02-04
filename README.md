@@ -20,6 +20,10 @@ In order to use the OCR capabilities you also have to install tesseract:
 [Install Google Tesseract OCR](https://github.com/tesseract-ocr/tesseract?tab=readme-ov-file#installing-tesseract) (additional info how to install the engine on Linux, Mac OSX and Windows). You must be able to invoke the tesseract command as 'tesseract'.
 Note: in our testing we always used tesseract 5+, as that proved to be the most reliable. So for Linux you might have to build from source to get tesseract 5.
 
+In order to run the PDF to image functionality you need to install poppler, e.g. on MacOSX:
+
+    brew install poppler
+
 ## Extracting Tables and Paragraphs
 
 Extracting tables and paragraphs of text can be done in one line:
