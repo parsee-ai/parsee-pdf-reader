@@ -14,6 +14,9 @@ from pdfminer.pdfpage import PDFPage
 import pytesseract
 from pytesseract import Output
 import cv2
+from PIL import Image
+import pillow_heif
+import numpy as np
 
 from pdf_reader.custom_dataclasses import PdfReaderConfig, NaturalTextHelper
 from pdf_reader.pdf_page import ParseePdfPage
@@ -26,7 +29,7 @@ This is in order not to add some additional packages like python-magic just for 
 
 
 def is_image(file_path: str):
-    image_types_supported = ["png", "jpg", "jpeg"]
+    image_types_supported = ["png", "jpg", "jpeg", "heic"]
     file_name = os.path.basename(file_path).lower()
     if "." in file_name:
         ending = file_name.rsplit(".", 1)
@@ -151,13 +154,27 @@ def needs_ocr(text_boxes: List[Union[LTTextBox, LTChar]]) -> bool:
     return False
 
 
-def get_elements_from_image(image_path: str) -> Tuple[Rect, List[LTChar]]:
+def get_elements_from_image(image_path: str) -> Tuple:
     CONF_THRESHOLD = 60
 
     output = []
 
-    # start tesseract
-    img = cv2.imread(image_path)
+    # HEIC support for Pillow
+    pillow_heif.register_heif_opener()
+
+    ext = os.path.splitext(image_path)[-1].lower()
+
+    if ext == '.heic':
+        # Open with Pillow and convert to np.array for cv2
+        with Image.open(image_path) as pil_img:
+            pil_img = pil_img.convert("RGB")  # cv2 can't handle RGBA very well
+            img = np.array(pil_img)
+            # Convert RGB (Pillow default) to BGR (cv2 default)
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    else:
+        img = cv2.imread(image_path)
+        if img is None:
+            raise ValueError(f"Unable to load image at {image_path}")
     height = img.shape[0]
     width = img.shape[1]
     tesseract_data = pytesseract.image_to_data(img, output_type=Output.DICT, config="--psm 11")
