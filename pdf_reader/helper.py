@@ -7,6 +7,9 @@ from subprocess import call
 import cv2
 from pdf2image import convert_from_path, pdfinfo_from_path
 from typing import List, Dict, Optional
+import pytesseract
+from PIL import Image
+
 
 IMG_BATCH_SIZE = 10
 
@@ -65,26 +68,58 @@ def get_target_size(width: int, height: int, target_size: int):
 
 
 def make_images_from_pdf(path_to_pdf: str, output_path: str, target_sizes: List[int], page_index_only: Optional[int]) -> Dict[int, List[str]]:
+    def detect_and_correct_rotation(image: Image.Image) -> Image.Image:
+        """
+        Use Tesseract OSD to detect page orientation and rotate if needed
+        """
+        try:
+            # Use Tesseract's OSD (Orientation and Script Detection)
+            osd_data = pytesseract.image_to_osd(image, output_type=pytesseract.Output.DICT)
+
+            # Get the detected rotation angle
+            rotate_angle = osd_data.get('rotate', 0)
+
+            # Get confidence score for the detection
+            orientation_conf = osd_data.get('orientation_conf', 0)
+
+            # Only rotate if confidence is above threshold (e.g., 1.0)
+            if orientation_conf > 1.0 and rotate_angle != 0:
+                # Rotate the image counter-clockwise to correct orientation
+                corrected_image = image.rotate(-rotate_angle, expand=True)
+                return corrected_image
+            else:
+                return image
+
+        except Exception as e:
+            print(f"Error in orientation detection: {e}")
+            # Return original image if OSD fails
+            return image
 
     def convert_batch(first_page_num: int, last_page_num: int):
         pages = convert_from_path(path_to_pdf, first_page=first_page_num, last_page=last_page_num, fmt="jpg")
         for page_index, image in enumerate(pages):
+            # Detect and correct rotation before resizing
+            corrected_image = detect_and_correct_rotation(image)
+
             for target_size in target_sizes:
                 if target_size not in image_paths:
                     image_paths[target_size] = []
-                image = image.resize(get_target_size(image.width, image.height, target_size))
-                image_path = os.path.join(output_path, f"{target_size}_p_{page_index + first_page_num -1}.jpg")
-                image.save(image_path, 'JPEG')
+
+                # Use the corrected image for resizing
+                resized_image = corrected_image.resize(get_target_size(corrected_image.width, corrected_image.height, target_size))
+                image_path = os.path.join(output_path, f"{target_size}_p_{page_index + first_page_num - 1}.jpg")
+                resized_image.save(image_path, 'JPEG')
                 image_paths[target_size].append(image_path)
 
     info = pdfinfo_from_path(path_to_pdf)
     max_pages = info["Pages"]
     image_paths = {}
+
     if page_index_only is None:
         for page_batch in range(1, max_pages + 1, IMG_BATCH_SIZE):
             convert_batch(page_batch, min(page_batch + IMG_BATCH_SIZE - 1, max_pages))
     else:
-        convert_batch(page_index_only+1, page_index_only+1)
+        convert_batch(page_index_only + 1, page_index_only + 1)
 
     return image_paths
 
