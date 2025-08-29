@@ -67,7 +67,7 @@ def get_target_size(width: int, height: int, target_size: int):
     return target_width, target_height
 
 
-def make_images_from_pdf(path_to_pdf: str, output_path: str, target_sizes: List[int], page_index_only: Optional[int]) -> Dict[int, List[str]]:
+def make_images_from_pdf(path_to_pdf: str, output_path: str, target_sizes: List[int], page_index_only: Optional[int], fix_rotation: bool = True) -> Dict[int, List[str]]:
     def detect_and_correct_rotation(image: Image.Image) -> Image.Image:
         """
         Use Tesseract OSD to detect page orientation and rotate if needed
@@ -99,7 +99,7 @@ def make_images_from_pdf(path_to_pdf: str, output_path: str, target_sizes: List[
         pages = convert_from_path(path_to_pdf, first_page=first_page_num, last_page=last_page_num, fmt="jpg")
         for page_index, image in enumerate(pages):
             # Detect and correct rotation before resizing
-            corrected_image = detect_and_correct_rotation(image)
+            corrected_image = detect_and_correct_rotation(image) if fix_rotation else image
 
             for target_size in target_sizes:
                 if target_size not in image_paths:
