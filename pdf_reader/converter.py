@@ -13,6 +13,7 @@ from pdfminer.layout import LAParams, LTTextBox, LTTextLine, LTChar, LTFigure, L
 from pdfminer.pdfpage import PDFPage
 import pytesseract
 from pytesseract import Output
+from pdf2image import pdfinfo_from_path
 import cv2
 from PIL import Image
 import pillow_heif
@@ -110,6 +111,13 @@ def get_pdf_pages(pdf_path: str, config: Optional[PdfReaderConfig] = None, force
             page_obj = ParseePdfPage(page_index, pdf_path, page.mediabox, text_boxes, config, get_natural_text(pypdf_reader, page_index))
         pages.append(page_obj)
 
+    # fallback in case there are no pages detected
+    if len(pages) == 0:
+        page_count = pdfinfo_from_path(pdf_path)["Pages"]
+        for page_index in range(0, page_count):
+            mediabox, text_boxes, pypdf_text = repair_layout(pdf_path, page_index)
+            page_obj = ParseePdfPage(page_index, pdf_path, mediabox, text_boxes, config, pypdf_text)
+            pages.append(page_obj)
     fp.close()
     return pages
 
